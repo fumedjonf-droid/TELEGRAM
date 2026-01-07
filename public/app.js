@@ -17,6 +17,13 @@ const categoryThemes = {
   },
 };
 
+const fallbackCategories = Object.entries(categoryThemes).map(([id, theme]) => ({
+  id,
+  name: theme.name,
+  description: "Каталог скоро появится",
+  background: theme.background,
+}));
+
 const paymentMethods = [
   {
     id: "card",
@@ -537,7 +544,7 @@ async function loadItems() {
     state.categories = buildCategories(state.items);
   } catch (error) {
     state.items = [];
-    state.categories = [];
+    state.categories = [...fallbackCategories];
   }
   render();
 }
@@ -557,6 +564,9 @@ function buildCategories(items) {
       background: theme?.background || "none",
     };
   });
+  if (!categories.length) {
+    return [...fallbackCategories];
+  }
   return categories.sort((a, b) => a.name.localeCompare(b.name, "ru"));
 }
 

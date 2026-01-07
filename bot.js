@@ -87,6 +87,30 @@ bot.command("admin", async (ctx) => {
   );
 });
 
+bot.command("help", async (ctx) => {
+  if (!ensureAdmin(ctx)) return;
+  await ctx.reply(
+    [
+      "Доступные команды:",
+      "/admin — меню админа",
+      "/additem — добавить товар",
+      "/items — список товаров",
+      "/orders — последние заказы",
+      "/msg <telegramUserId> <текст> — сообщение пользователю",
+      "/broadcast <текст> — рассылка",
+      "/price <itemId> <newPrice> — изменить цену",
+      "/title <itemId> <text> — изменить название",
+      "/desc <itemId> <text> — изменить описание",
+      "/cat <itemId> <FreeFire|PUBG|Steam|Other> — изменить категорию",
+      "/hide <itemId> — скрыть товар",
+      "/show <itemId> — показать товар",
+      "/del <itemId> — удалить товар",
+      "/photo <itemId> — обновить фото товара",
+      "/cancel — отменить действие",
+    ].join("\n")
+  );
+});
+
 bot.command("additem", async (ctx) => {
   if (!ensureAdmin(ctx)) return;
   addItemFlow.set(ctx.from.id, { step: "title", data: {} });
@@ -253,6 +277,8 @@ bot.command("photo", async (ctx) => {
 bot.on("text", async (ctx) => {
   if (!ensureAdmin(ctx, true)) return;
   const flow = addItemFlow.get(ctx.from.id);
+  const text = ctx.message.text.trim();
+  if (text.startsWith("/") && !(flow?.step === "photo" && text === "/skip")) return;
   if (flow) {
     await handleAddItemText(ctx, flow);
     return;
