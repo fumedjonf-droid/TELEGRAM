@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Telegram WebApp</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 24px;
+      }
+      .card {
+        border: 1px solid #ddd;
+        border-radius: 12px;
+        padding: 16px;
+        max-width: 520px;
+      }
+      label {
+        display: block;
+        margin-top: 12px;
+      }
+      input,
+      textarea {
+        width: 100%;
+        padding: 8px;
+        margin-top: 4px;
+        box-sizing: border-box;
+      }
+      button {
+        margin-top: 16px;
+        padding: 12px 16px;
+        width: 100%;
+        background: #0088cc;
+        color: #fff;
+        border: none;
+        border-radius: 8px;
+        font-size: 16px;
+      }
+      .status {
+        margin-top: 12px;
+        font-weight: bold;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h2>Оформление заказа</h2>
+      <label>
+        Описание
+        <input id="title" value="105 алмазов" />
+      </label>
+      <label>
+        ID игрока
+        <input id="player_id" placeholder="Введите ID" />
+      </label>
+      <label>
+        Сумма
+        <input id="amount" type="number" value="10" />
+      </label>
+      <label>
+        Валюта
+        <input id="currency" value="USD" />
+      </label>
+      <label>
+        Комментарий
+        <textarea id="comment" rows="3"></textarea>
+      </label>
+      <button id="pay">Имитация оплаты</button>
+      <div class="status" id="status"></div>
+    </div>
+    <script>
+      const tg = window.Telegram.WebApp;
+      tg.ready();
+
+      const status = document.getElementById("status");
+      const button = document.getElementById("pay");
+
+      button.addEventListener("click", async () => {
+        const user = tg.initDataUnsafe?.user;
+        if (!user) {
+          status.textContent = "Ошибка: нет данных Telegram";
+          return;
+        }
+
+        const payload = {
+          tg_user_id: user.id,
+          tg_username: user.username || null,
+          title: document.getElementById("title").value,
+          description: "WebApp order",
+          player_id: document.getElementById("player_id").value,
+          amount: parseFloat(document.getElementById("amount").value),
+          currency: document.getElementById("currency").value,
+          comment: document.getElementById("comment").value,
+        };
+
+        try {
+          status.textContent = "Отправляем заказ...";
+          const response = await fetch("/order", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          if (!response.ok) {
+            throw new Error("Ошибка сервера");
+          }
+          const data = await response.json();
+          status.textContent = `Заказ #${data.order_id} создан, статус: ${data.status}`;
+        } catch (error) {
+          status.textContent = "Ошибка при создании заказа";
+        }
+      });
+    </script>
+  </body>
+</html>
