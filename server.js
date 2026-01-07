@@ -15,13 +15,13 @@ const { sendAdminNotification, launchBot } = require("./bot");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-const uploadsDir = path.join(__dirname, "uploads");
-fs.mkdirSync(uploadsDir, { recursive: true });
+const receiptsDir = path.join(__dirname, "storage", "receipts");
+fs.mkdirSync(receiptsDir, { recursive: true });
 
 const upload = multer({
   storage: multer.diskStorage({
     destination: (_req, _file, cb) => {
-      cb(null, uploadsDir);
+      cb(null, receiptsDir);
     },
     filename: (_req, file, cb) => {
       const ext = path.extname(file.originalname) || ".jpg";
@@ -45,6 +45,7 @@ app.post("/api/verify-player", (req, res) => {
   const valid = /^\d{6,15}$/.test(playerId);
   const nickname = valid && gameId === "free-fire" ? `FF-${playerId.slice(-4)}` : "";
 
+  console.warn("verify-player stub used", { gameId });
   res.json({ valid, nickname });
 });
 
@@ -58,9 +59,13 @@ app.post("/api/orders", (req, res) => {
   } = req.body;
 
   const initData = req.header("X-Telegram-InitData") || "";
-  const initUser = parseTelegramUser(initData);
-  const telegramUserId = initUser?.id || null;
-  const telegramUsername = initUser?.username || null;
+  const initUser = validateTelegramInitData(initData, process.env.BOT_TOKEN);
+  if (!initUser) {
+    res.status(401).json({ ok: false, error: "Invalid Telegram initData" });
+    return;
+  }
+  const telegramUserId = initUser.id || null;
+  const telegramUsername = initUser.username || null;
 
   if (!gameId || !productId || !playerId || !paymentMethod) {
     res.status(400).json({ ok: false, error: "Missing required fields" });
@@ -188,6 +193,29 @@ function parseTelegramUser(initData) {
   } catch (error) {
     return null;
   }
+}
+
+function validateTelegramInitData(initData, botToken) {
+  if (!initData || !botToken) return null;
+  const params = new URLSearchParams(initData);
+  const hash = params.get("hash");
+  if (!hash) return null;
+  params.delete("hash");
+
+  const dataCheck = Array.from(params.entries())
+    .map(([key, value]) => `${key}=${value}`)
+    .sort()
+    .join("\n");
+
+  const secret = crypto
+    .createHmac("sha256", "WebAppData")
+    .update(botToken)
+    .digest();
+
+  const expectedHash = crypto.createHmac("sha256", secret).update(dataCheck).digest("hex");
+
+  if (expectedHash !== hash) return null;
+  return parseTelegramUser(initData);
 }
 
 const catalog = {
