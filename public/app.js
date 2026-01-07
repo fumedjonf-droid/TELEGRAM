@@ -1,62 +1,21 @@
-const games = [
-  {
-    id: "free-fire",
+const categoryThemes = {
+  FreeFire: {
     name: "Free Fire",
-    description: "Алмазы и пополнение",
     background: "url('https://images.unsplash.com/photo-1605902711622-cfb43c4437d1?auto=format&fit=crop&w=900&q=80')",
-    productImage: "assets/free-fire.svg",
-    products: [
-      { id: "ff-105", amount: "105 алмазов", price: 89 },
-      { id: "ff-326", amount: "326 алмазов", price: 239 },
-      { id: "ff-431", amount: "431 алмазов", price: 299 },
-      { id: "ff-546", amount: "546 алмазов", price: 399 },
-      { id: "ff-1133", amount: "1133 алмазов", price: 789 },
-      { id: "ff-1439", amount: "1439 алмазов", price: 999 },
-      { id: "ff-659", amount: "659 алмазов", price: 479 },
-      { id: "ff-2398", amount: "2398 алмазов", price: 1699 },
-      { id: "ff-6160", amount: "6160 алмазов", price: 4399 },
-      { id: "ff-12320", amount: "12320 алмазов", price: 8699 },
-      { id: "ff-18", amount: "18 алмазов", price: 29 },
-      { id: "ff-480", amount: "480 алмазов", price: 349 },
-    ],
   },
-  {
-    id: "steam",
-    name: "Steam",
-    description: "Пополнение баланса",
-    background: "url('https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=900&q=80')",
-    products: [
-      { id: "steam-500", amount: "500 ₽", price: 550 },
-      { id: "steam-1000", amount: "1000 ₽", price: 1090 },
-      { id: "steam-2000", amount: "2000 ₽", price: 2150 },
-    ],
-  },
-  {
-    id: "pubg",
+  PUBG: {
     name: "PUBG Mobile",
-    description: "UC пакеты",
     background: "url('https://images.unsplash.com/photo-1488521787991-ed7bbaae773c?auto=format&fit=crop&w=900&q=80')",
-    products: [
-      { id: "pubg-60", amount: "60 UC", price: 119 },
-      { id: "pubg-325", amount: "325 UC", price: 579 },
-      { id: "pubg-660", amount: "660 UC", price: 1129 },
-    ],
   },
-  {
-    id: "tg-stars",
-    name: "TG Stars",
-    description: "Звезды Telegram",
+  Steam: {
+    name: "Steam",
+    background: "url('https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=900&q=80')",
+  },
+  Other: {
+    name: "Другое",
     background: "url('https://images.unsplash.com/photo-1520607162513-77705c0f0d4a?auto=format&fit=crop&w=900&q=80')",
-    products: [],
   },
-  {
-    id: "mobile-legends",
-    name: "Mobile Legends",
-    description: "Diamonds",
-    background: "url('https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?auto=format&fit=crop&w=900&q=80')",
-    products: [],
-  },
-];
+};
 
 const paymentMethods = [
   {
@@ -85,8 +44,10 @@ const paymentMethods = [
 const state = {
   currentView: "games",
   history: [],
-  selectedGame: null,
-  selectedProduct: null,
+  items: [],
+  categories: [],
+  selectedCategory: null,
+  selectedItem: null,
   playerId: "",
   nickname: "",
   playerVerified: false,
@@ -203,7 +164,7 @@ function render() {
 function updateHeader() {
   const titles = {
     games: "Каталог игр",
-    products: state.selectedGame?.name || "Каталог товаров",
+    products: state.selectedCategory?.name || "Каталог товаров",
     checkout: "Оформление заказа",
     payment: "Оплата",
     proof: "Подтверждение",
@@ -217,15 +178,23 @@ function updateHeader() {
 
 function renderGames() {
   const grid = appContent.querySelector("[data-view='games']");
-  games.forEach((game) => {
+  if (!state.categories.length) {
+    const empty = document.createElement("div");
+    empty.className = "empty-state";
+    empty.textContent = "Каталог пока пуст.";
+    grid.appendChild(empty);
+    return;
+  }
+
+  state.categories.forEach((category) => {
     const card = document.createElement("button");
     card.type = "button";
     card.className = "game-card";
-    card.style.setProperty("--game-bg", game.background || "none");
-    card.innerHTML = `<div><h3>${game.name}</h3><p>${game.description}</p></div>`;
+    card.style.setProperty("--game-bg", category.background || "none");
+    card.innerHTML = `<div><h3>${category.name}</h3><p>${category.description || ""}</p></div>`;
     card.addEventListener("click", () => {
-      state.selectedGame = game;
-      state.selectedProduct = null;
+      state.selectedCategory = category;
+      state.selectedItem = null;
       pushView("products");
     });
     grid.appendChild(card);
@@ -239,7 +208,8 @@ function renderProducts() {
 
   grid.innerHTML = "";
 
-  if (!state.selectedGame.products.length) {
+  const items = state.items.filter((item) => item.category === state.selectedCategory?.id);
+  if (!items.length) {
     const empty = document.createElement("div");
     empty.className = "empty-state";
     empty.textContent = "Каталог скоро появится. Следите за обновлениями!";
@@ -248,20 +218,20 @@ function renderProducts() {
     return;
   }
 
-  state.selectedGame.products.forEach((product) => {
+  items.forEach((item) => {
     const card = document.createElement("div");
     card.className = "product-card";
     card.innerHTML = `
       <div class="product-card__image">
-        <img src="${state.selectedGame.productImage || "assets/free-fire.svg"}" alt="${product.amount}" />
+        <img src="${buildImageUrl(item.imageUrl) || "assets/free-fire.svg"}" alt="${item.title}" />
       </div>
       <div>
-        <h3>${product.amount}</h3>
-        <p>${state.selectedGame.name}</p>
+        <h3>${item.title}</h3>
+        <p>${state.selectedCategory?.name || ""}</p>
         <div class="product-meta">
-          <strong>${product.price} ₽</strong>
+          <strong>${item.price} ${item.currency}</strong>
           <button class="secondary-button" type="button">${
-            state.selectedProduct?.id === product.id ? "Выбрано" : "Выбрать"
+            state.selectedItem?.id === item.id ? "Выбрано" : "Выбрать"
           }</button>
         </div>
       </div>
@@ -270,29 +240,29 @@ function renderProducts() {
     const button = card.querySelector("button");
     button.addEventListener("click", (event) => {
       event.stopPropagation();
-      selectProduct(product);
+      selectItem(item);
     });
 
-    card.addEventListener("click", () => selectProduct(product));
+    card.addEventListener("click", () => selectItem(item));
 
-    if (state.selectedProduct?.id === product.id) {
+    if (state.selectedItem?.id === item.id) {
       card.classList.add("selected");
     }
 
     grid.appendChild(card);
   });
 
-  if (state.selectedProduct) {
+  if (state.selectedItem) {
     purchaseCta.hidden = false;
-    purchaseButton.textContent = `Купить ${state.selectedProduct.amount} за ${state.selectedProduct.price} ₽`;
+    purchaseButton.textContent = `Купить ${state.selectedItem.title} за ${state.selectedItem.price} ${state.selectedItem.currency}`;
     purchaseButton.addEventListener("click", () => pushView("checkout"));
   } else {
     purchaseCta.hidden = true;
   }
 }
 
-function selectProduct(product) {
-  state.selectedProduct = product;
+function selectItem(item) {
+  state.selectedItem = item;
   render();
 }
 
@@ -301,9 +271,9 @@ function renderCheckout() {
   const orderProduct = appContent.querySelector("[data-role='order-product']");
   const orderPrice = appContent.querySelector("[data-role='order-price']");
 
-  orderGame.textContent = `Игра: ${state.selectedGame.name}`;
-  orderProduct.textContent = `Товар: ${state.selectedProduct.amount}`;
-  orderPrice.textContent = `Цена: ${state.selectedProduct.price} ₽`;
+  orderGame.textContent = `Категория: ${state.selectedCategory?.name || ""}`;
+  orderProduct.textContent = `Товар: ${state.selectedItem.title}`;
+  orderPrice.textContent = `Цена: ${state.selectedItem.price} ${state.selectedItem.currency}`;
 
   const playerIdInput = appContent.querySelector("#playerId");
   const verifyButton = appContent.querySelector("#verifyButton");
@@ -361,7 +331,7 @@ function renderCheckout() {
     verifyButton.disabled = true;
     verifyButton.textContent = "Проверяем...";
 
-    const result = await verifyPlayer(state.selectedGame.id, value);
+    const result = await verifyPlayer(state.selectedCategory?.id || "unknown", value);
     state.playerId = value;
     state.playerVerified = result.valid;
     state.nickname = result.nickname;
@@ -376,11 +346,7 @@ function renderCheckout() {
     if (!state.playerVerified || !state.selectedPayment) return;
 
     const order = await createOrder({
-      gameId: state.selectedGame.id,
-      productId: state.selectedProduct.id,
-      amount: state.selectedProduct.amount,
-      price: state.selectedProduct.price,
-      currency: "RUB",
+      itemId: state.selectedItem.id,
       playerId: state.playerId,
       nickname: state.nickname,
       paymentMethod: state.selectedPayment.id,
@@ -401,9 +367,9 @@ function updateProceedButton(button) {
 function renderPayment() {
   const requisites = state.requisites || state.selectedPayment;
 
-  appContent.querySelector("[data-role='payment-game']").textContent = `Игра: ${state.selectedGame.name}`;
-  appContent.querySelector("[data-role='payment-product']").textContent = `Товар: ${state.selectedProduct.amount}`;
-  appContent.querySelector("[data-role='payment-price']").textContent = `Сумма: ${state.selectedProduct.price} ₽`;
+  appContent.querySelector("[data-role='payment-game']").textContent = `Категория: ${state.selectedCategory?.name || ""}`;
+  appContent.querySelector("[data-role='payment-product']").textContent = `Товар: ${state.selectedItem.title}`;
+  appContent.querySelector("[data-role='payment-price']").textContent = `Сумма: ${state.selectedItem.price} ${state.selectedItem.currency}`;
   appContent.querySelector("[data-role='payment-code']").textContent = `Код заказа: ${state.orderCode}`;
 
   appContent.querySelector("[data-role='payment-requisites']").textContent = `Реквизиты: ${requisites.requisites}`;
@@ -520,7 +486,7 @@ async function submitPaymentProof({ orderId, receipt, comment, cardSuffix }) {
 }
 
 function generateOrderCode() {
-  const prefix = state.selectedGame.name.slice(0, 2).toUpperCase();
+  const prefix = state.selectedCategory?.name?.slice(0, 2).toUpperCase() || "MY";
   const suffix = Math.floor(Math.random() * 900000 + 100000);
   return `${prefix}-${suffix}`;
 }
@@ -559,5 +525,43 @@ async function apiRequest(url, payload) {
 
 document.addEventListener("DOMContentLoaded", () => {
   initTelegram();
-  render();
+  loadItems();
 });
+
+async function loadItems() {
+  try {
+    const response = await fetch("/api/items");
+    if (!response.ok) throw new Error("Failed to load items");
+    const data = await response.json();
+    state.items = data.items || [];
+    state.categories = buildCategories(state.items);
+  } catch (error) {
+    state.items = [];
+    state.categories = [];
+  }
+  render();
+}
+
+function buildCategories(items) {
+  const grouped = items.reduce((acc, item) => {
+    if (!acc[item.category]) acc[item.category] = [];
+    acc[item.category].push(item);
+    return acc;
+  }, {});
+  const categories = Object.keys(grouped).map((category) => {
+    const theme = categoryThemes[category] || categoryThemes.Other;
+    return {
+      id: category,
+      name: theme?.name || category,
+      description: `${grouped[category].length} товаров`,
+      background: theme?.background || "none",
+    };
+  });
+  return categories.sort((a, b) => a.name.localeCompare(b.name, "ru"));
+}
+
+function buildImageUrl(pathValue) {
+  if (!pathValue) return "";
+  if (pathValue.startsWith("http")) return pathValue;
+  return `${window.location.origin}${pathValue}`;
+}

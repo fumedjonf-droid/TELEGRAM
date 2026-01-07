@@ -9,30 +9,36 @@ const {
   createOrder,
   updateOrder,
   getOrder,
+  listItems,
+  getItem,
+  upsertUser,
 } = require("./storage");
 const { sendAdminNotification, launchBot } = require("./bot");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-const receiptsDir = path.join(__dirname, "storage", "receipts");
+const receiptsDir = path.join(__dirname, "uploads", "receipts");
+const itemsDir = path.join(__dirname, "uploads", "items");
 fs.mkdirSync(receiptsDir, { recursive: true });
+fs.mkdirSync(itemsDir, { recursive: true });
 
-const upload = multer({
+const receiptUpload = multer({
   storage: multer.diskStorage({
     destination: (_req, _file, cb) => {
       cb(null, receiptsDir);
     },
-    filename: (_req, file, cb) => {
+    filename: (req, file, cb) => {
       const ext = path.extname(file.originalname) || ".jpg";
-      const name = `${Date.now()}-${crypto.randomUUID()}${ext}`;
-      cb(null, name);
+      const orderId = req.params?.orderId || crypto.randomUUID();
+      cb(null, `${orderId}${ext}`);
     },
   }),
 });
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 app.get("/", (_req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
@@ -49,10 +55,25 @@ app.post("/api/verify-player", (req, res) => {
   res.json({ valid, nickname });
 });
 
+app.get("/api/items", (req, res) => {
+  const items = listItems().filter((item) => item.isActive);
+  const category = req.query.category;
+  const filtered = category ? items.filter((item) => item.category === category) : items;
+  res.json({ items: filtered });
+});
+
+app.get("/api/items/:id", (req, res) => {
+  const item = getItem(req.params.id);
+  if (!item || !item.isActive) {
+    res.status(404).json({ ok: false, error: "Item not found" });
+    return;
+  }
+  res.json({ item });
+});
+
 app.post("/api/orders", (req, res) => {
   const {
-    gameId,
-    productId,
+    itemId,
     playerId,
     nickname,
     paymentMethod,
@@ -67,44 +88,50 @@ app.post("/api/orders", (req, res) => {
   const telegramUserId = initUser.id || null;
   const telegramUsername = initUser.username || null;
 
-  if (!gameId || !productId || !playerId || !paymentMethod) {
+  if (!itemId || !playerId || !paymentMethod) {
     res.status(400).json({ ok: false, error: "Missing required fields" });
     return;
   }
 
-  const product = getProduct(gameId, productId);
-  if (!product) {
-    res.status(400).json({ ok: false, error: "Unknown product" });
+  const item = getItem(itemId);
+  if (!item || !item.isActive) {
+    res.status(400).json({ ok: false, error: "Unknown item" });
     return;
   }
 
   const orderId = crypto.randomUUID();
-  const orderCode = `${gameId.slice(0, 2).toUpperCase()}-${Math.floor(Math.random() * 900000 + 100000)}`;
+  const orderCode = `MYGA-${Math.floor(Math.random() * 900000 + 100000)}`;
 
   const requisites = resolveRequisites(paymentMethod);
 
   const order = {
     id: orderId,
     orderCode,
-    gameId,
-    productId,
-    title: product.title,
-    price: product.price,
-    currency: product.currency,
+    telegramUserId,
+    itemId: item.id,
+    itemTitle: item.title,
+    price: item.price,
+    currency: item.currency,
     playerId,
     nickname,
     paymentMethod,
-    telegramUserId,
     telegramUsername,
     requisites,
-    deliverType: product.deliverType,
-    deliverPayload: product.deliverPayload,
-    status: "CREATED",
+    status: "WAITING_PROOF",
     createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
   };
 
   createOrder(order);
-  console.log("Order created", { orderId, gameId, productId, telegramUserId });
+  upsertUser({
+    telegramUserId,
+    username: telegramUsername || "",
+    firstName: initUser.first_name || "",
+    lastName: initUser.last_name || "",
+    lastSeenAt: new Date().toISOString(),
+    isBlocked: false,
+  });
+  console.log("Order created", { orderId, itemId: item.id, telegramUserId });
 
   res.json({
     id: orderId,
@@ -113,7 +140,7 @@ app.post("/api/orders", (req, res) => {
   });
 });
 
-app.post("/api/orders/:orderId/proof", upload.single("receipt"), async (req, res) => {
+app.post("/api/orders/:orderId/proof", receiptUpload.single("receipt"), async (req, res) => {
   const { orderId } = req.params;
   const order = getOrder(orderId);
 
@@ -127,7 +154,7 @@ app.post("/api/orders/:orderId/proof", upload.single("receipt"), async (req, res
     return;
   }
 
-  if (order.status === "PENDING_ADMIN" || order.status === "PAID_CONFIRMED") {
+  if (order.status === "PENDING_ADMIN_CONFIRMATION" || order.status === "APPROVED") {
     res.status(409).json({ ok: false, error: "Proof already submitted" });
     return;
   }
@@ -136,9 +163,11 @@ app.post("/api/orders/:orderId/proof", upload.single("receipt"), async (req, res
   const cardSuffix = req.body.cardSuffix || "";
   const initData = req.body.initData || "";
 
+  const proofUrl = `/uploads/receipts/${req.file.filename}`;
   const updated = updateOrder(orderId, {
-    status: "PENDING_ADMIN",
+    status: "PENDING_ADMIN_CONFIRMATION",
     receiptPath: req.file.path,
+    proofUrl,
     comment,
     cardSuffix,
     initData,
@@ -177,12 +206,6 @@ function resolveRequisites(method) {
   };
 }
 
-function getProduct(gameId, productId) {
-  const game = catalog[gameId];
-  if (!game) return null;
-  return game.products.find((product) => product.id === productId) || null;
-}
-
 function parseTelegramUser(initData) {
   if (!initData) return null;
   const params = new URLSearchParams(initData);
@@ -217,101 +240,6 @@ function validateTelegramInitData(initData, botToken) {
   if (expectedHash !== hash) return null;
   return parseTelegramUser(initData);
 }
-
-const catalog = {
-  "free-fire": {
-    products: [
-      {
-        id: "ff-100",
-        title: "100 алмазов",
-        price: 149,
-        currency: "RUB",
-        deliverType: "manual",
-        deliverPayload: "Заказ подтвержден ✅, пополнение будет выполнено в ближайшее время.",
-      },
-      {
-        id: "ff-310",
-        title: "310 алмазов",
-        price: 399,
-        currency: "RUB",
-        deliverType: "manual",
-        deliverPayload: "Заказ подтвержден ✅, пополнение будет выполнено в ближайшее время.",
-      },
-      {
-        id: "ff-520",
-        title: "520 алмазов",
-        price: 699,
-        currency: "RUB",
-        deliverType: "manual",
-        deliverPayload: "Заказ подтвержден ✅, пополнение будет выполнено в ближайшее время.",
-      },
-      {
-        id: "ff-1060",
-        title: "1060 алмазов",
-        price: 1299,
-        currency: "RUB",
-        deliverType: "manual",
-        deliverPayload: "Заказ подтвержден ✅, пополнение будет выполнено в ближайшее время.",
-      },
-    ],
-  },
-  steam: {
-    products: [
-      {
-        id: "steam-500",
-        title: "Steam 500 ₽",
-        price: 550,
-        currency: "RUB",
-        deliverType: "manual",
-        deliverPayload: "Оплата подтверждена ✅, пополнение баланса будет выполнено.",
-      },
-      {
-        id: "steam-1000",
-        title: "Steam 1000 ₽",
-        price: 1090,
-        currency: "RUB",
-        deliverType: "manual",
-        deliverPayload: "Оплата подтверждена ✅, пополнение баланса будет выполнено.",
-      },
-      {
-        id: "steam-2000",
-        title: "Steam 2000 ₽",
-        price: 2150,
-        currency: "RUB",
-        deliverType: "manual",
-        deliverPayload: "Оплата подтверждена ✅, пополнение баланса будет выполнено.",
-      },
-    ],
-  },
-  pubg: {
-    products: [
-      {
-        id: "pubg-60",
-        title: "60 UC",
-        price: 119,
-        currency: "RUB",
-        deliverType: "manual",
-        deliverPayload: "Оплата подтверждена ✅, пополнение будет выполнено.",
-      },
-      {
-        id: "pubg-325",
-        title: "325 UC",
-        price: 579,
-        currency: "RUB",
-        deliverType: "manual",
-        deliverPayload: "Оплата подтверждена ✅, пополнение будет выполнено.",
-      },
-      {
-        id: "pubg-660",
-        title: "660 UC",
-        price: 1129,
-        currency: "RUB",
-        deliverType: "manual",
-        deliverPayload: "Оплата подтверждена ✅, пополнение будет выполнено.",
-      },
-    ],
-  },
-};
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
