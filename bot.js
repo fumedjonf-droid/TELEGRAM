@@ -17,10 +17,17 @@ if (!BOT_TOKEN) {
 const bot = new Telegraf(BOT_TOKEN);
 
 bot.start((ctx) => {
+  const webAppUrl = getWebAppUrl();
+  if (!webAppUrl) {
+    return ctx.reply(
+      "WebApp URL не настроен. Укажите PUBLIC_BASE_URL как HTTPS ссылку на ваш сайт (например, https://your-domain.example)."
+    );
+  }
+
   return ctx.reply(
     "Добро пожаловать!",
     Markup.inlineKeyboard([
-      Markup.button.webApp("Открыть магазин", `${PUBLIC_BASE_URL}/`),
+      Markup.button.webApp("Открыть магазин", `${webAppUrl}/`),
     ])
   );
 });
@@ -129,9 +136,28 @@ async function isGroupAdmin(ctx, userId, chatId) {
 }
 
 function launchBot() {
+  const webAppUrl = getWebAppUrl();
+  if (!webAppUrl) {
+    console.warn(
+      "PUBLIC_BASE_URL is missing or invalid. Set an HTTPS URL (e.g. https://your-domain.example) before using /start."
+    );
+  }
   bot.launch();
   process.once("SIGINT", () => bot.stop("SIGINT"));
   process.once("SIGTERM", () => bot.stop("SIGTERM"));
+}
+
+function getWebAppUrl() {
+  if (!PUBLIC_BASE_URL) return null;
+  const trimmed = PUBLIC_BASE_URL.trim();
+  if (!trimmed || /\s/.test(trimmed)) return null;
+  try {
+    const url = new URL(trimmed);
+    if (url.protocol !== "https:") return null;
+    return url.toString().replace(/\/+$/, "");
+  } catch (error) {
+    return null;
+  }
 }
 
 module.exports = {
