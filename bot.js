@@ -27,7 +27,11 @@ bot.start((ctx) => {
 
 bot.on("callback_query", async (ctx) => {
   const userId = ctx.from?.id;
-  if (!ADMIN_USER_IDS.includes(userId)) {
+  const chatId = ctx.chat?.id;
+  const isSuperAdmin = ADMIN_USER_IDS.includes(userId);
+  const hasGroupAccess = await isGroupAdmin(ctx, userId, chatId);
+
+  if (!hasGroupAccess && !isSuperAdmin) {
     await ctx.answerCbQuery("Нет прав", { show_alert: true });
     return;
   }
@@ -46,9 +50,10 @@ bot.on("callback_query", async (ctx) => {
   }
 
   if (action === "confirm") {
-    updateOrder(orderId, { status: "PAID_CONFIRMED", resolvedAt: new Date().toISOString() });
+    const confirmed = updateOrder(orderId, { status: "PAID_CONFIRMED", resolvedAt: new Date().toISOString() });
     await ctx.answerCbQuery("Оплата подтверждена");
-    await notifyUser(order, "Оплата подтверждена ✅");
+    await deliverOrder(confirmed);
+    return;
   }
 
   if (action === "reject") {
@@ -67,6 +72,20 @@ async function notifyUser(order, message) {
   }
 }
 
+async function deliverOrder(order) {
+  if (!order) return;
+
+  if (order.deliverType === "file" && order.deliverPayload) {
+    await bot.telegram.sendDocument(order.telegramUserId, { source: path.resolve(order.deliverPayload) });
+  } else if (order.deliverType === "text" && order.deliverPayload) {
+    await notifyUser(order, order.deliverPayload);
+  } else {
+    await notifyUser(order, "Оплата подтверждена ✅ Ваш заказ передан в обработку.");
+  }
+
+  updateOrder(order.id, { status: "FULFILLED", fulfilledAt: new Date().toISOString() });
+}
+
 async function sendAdminNotification(order, receiptPath) {
   const keyboard = Markup.inlineKeyboard([
     [
@@ -82,7 +101,7 @@ async function sendAdminNotification(order, receiptPath) {
     `Сумма: ${order.price} ${order.currency}`,
     `Метод оплаты: ${order.paymentMethod}`,
     `Player ID: ${order.playerId} (${order.nickname || "без никнейма"})`,
-    `Покупатель: ${order.telegramUserId || "неизвестно"}`,
+    `Покупатель: ${order.telegramUserId || "неизвестно"} ${order.telegramUsername ? `(@${order.telegramUsername})` : ""}`,
     `Дата: ${order.createdAt}`,
   ];
 
@@ -96,6 +115,17 @@ async function sendAdminNotification(order, receiptPath) {
       reply_markup: keyboard.reply_markup,
     }
   );
+}
+
+async function isGroupAdmin(ctx, userId, chatId) {
+  if (!userId || !chatId) return false;
+  if (String(chatId) !== String(ADMIN_GROUP_ID)) return false;
+  try {
+    const member = await ctx.telegram.getChatMember(chatId, userId);
+    return member.status === "administrator" || member.status === "creator";
+  } catch (error) {
+    return false;
+  }
 }
 
 function launchBot() {

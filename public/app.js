@@ -416,7 +416,7 @@ async function verifyPlayer(gameId, playerId) {
 
   if (response) {
     return {
-      valid: response.ok,
+      valid: response.valid,
       nickname: response.nickname || "",
     };
   }
@@ -434,8 +434,8 @@ async function createOrder(payload) {
 
   if (response) {
     return {
-      id: response.orderId,
-      code: response.orderCode,
+      id: response.id,
+      code: response.code,
       requisites: {
         requisites: response.requisites.number,
         bank: response.requisites.bank,
