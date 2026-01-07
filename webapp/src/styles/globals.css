@@ -294,6 +294,28 @@ body {
   color: #64748b;
 }
 
+.proof-icon {
+  font-size: 20px;
+}
+
+.requisites {
+  margin-top: 12px;
+  background: white;
+  border-radius: 12px;
+  padding: 12px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+}
+
+.requisites-title {
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.requisites-body {
+  font-size: 13px;
+  color: #475569;
+}
+
 .trust-note {
   display: flex;
   gap: 8px;

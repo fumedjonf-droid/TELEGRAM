@@ -20,6 +20,9 @@ export const getDb = (): Db => {
     dbInstance.exec(
       "CREATE INDEX IF NOT EXISTS idx_admins_telegram_id ON admins(telegram_id);"
     );
+    dbInstance.exec(
+      "CREATE INDEX IF NOT EXISTS idx_order_outbox_processed ON order_outbox(processed_at, event_type);"
+    );
   }
   return dbInstance;
 };

@@ -33,9 +33,6 @@ const upload = multer({
 
 type AuthedRequest = express.Request & { user?: { telegramId: string; username?: string } };
 
-type ServerDeps = {
-  notifyOrderPaidReview: (orderId: number) => Promise<void>;
-};
 
 const requireTelegramAuth = (req: AuthedRequest, res: express.Response, next: express.NextFunction) => {
   const initData = req.header("X-TG-INIT-DATA");
@@ -50,7 +47,7 @@ const requireTelegramAuth = (req: AuthedRequest, res: express.Response, next: ex
   next();
 };
 
-export const createServer = ({ notifyOrderPaidReview }: ServerDeps) => {
+export const createServer = () => {
   const app = express();
   app.use(helmet());
   app.use(
@@ -114,6 +111,19 @@ export const createServer = ({ notifyOrderPaidReview }: ServerDeps) => {
       )
       .all();
     res.json(categories);
+  });
+
+  app.get("/api/payments", (_req, res) => {
+    const db = getDb();
+    const rows = db
+      .prepare(\"SELECT key, value FROM settings WHERE key IN ('payment_dc_requisites', 'payment_card_requisites', 'payment_qr_image')\")
+      .all() as { key: string; value: string }[];
+    const map = new Map(rows.map((row) => [row.key, row.value]));
+    res.json({
+      dc: map.get(\"payment_dc_requisites\") ?? null,
+      card: map.get(\"payment_card_requisites\") ?? null,
+      qr: map.get(\"payment_qr_image\") ?? null,
+    });
   });
 
   app.post("/api/orders", requireTelegramAuth, (req: AuthedRequest, res) => {
@@ -259,7 +269,9 @@ export const createServer = ({ notifyOrderPaidReview }: ServerDeps) => {
       now,
       orderId
     );
-    await notifyOrderPaidReview(orderId);
+    db.prepare(
+      "INSERT INTO order_outbox (order_id, event_type, created_at) VALUES (?, ?, ?)"
+    ).run(orderId, "order_ready_for_review", now);
     return res.json({ ok: true, status: "paid_review" });
   });
 

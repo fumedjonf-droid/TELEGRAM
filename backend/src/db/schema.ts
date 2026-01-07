@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS orders (
   proof_type TEXT,
   proof_received_at TEXT,
   proof_path TEXT,
+  reminder_sent_at TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   FOREIGN KEY (user_id) REFERENCES users(id)
@@ -70,6 +71,30 @@ CREATE TABLE IF NOT EXISTS admin_actions (
   admin_telegram_id TEXT NOT NULL,
   action TEXT NOT NULL,
   note TEXT,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY (order_id) REFERENCES orders(id)
+);
+
+CREATE TABLE IF NOT EXISTS settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  updated_by TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS payment_history (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  type TEXT NOT NULL CHECK(type IN ('dc', 'card', 'qr')),
+  value TEXT NOT NULL,
+  changed_by TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS order_outbox (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  order_id INTEGER NOT NULL,
+  event_type TEXT NOT NULL,
+  processed_at TEXT,
   created_at TEXT NOT NULL,
   FOREIGN KEY (order_id) REFERENCES orders(id)
 );

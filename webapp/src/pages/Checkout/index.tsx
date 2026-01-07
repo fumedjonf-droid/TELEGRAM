@@ -3,8 +3,10 @@ import { PageContainer } from "../../components/layout/PageContainer";
 import { useCartStore } from "../../store/cart.store";
 import { formatMoney } from "../../utils/formatMoney";
 import { motion } from "framer-motion";
+import { useQuery } from "@tanstack/react-query";
+import { fetchPayments } from "../../api/payments.api";
 
-const paymentMethods = ["DC", "Карта", "QR"] as const;
+const paymentMethods = ["DC", "Карта"] as const;
 
 export const Checkout = () => {
   const items = useCartStore((state) => state.items);
@@ -13,6 +15,7 @@ export const Checkout = () => {
   const [paymentMethod, setPaymentMethod] = useState<string | null>(null);
   const [proof, setProof] = useState<File | null>(null);
   const [attempted, setAttempted] = useState(false);
+  const { data: payments } = useQuery({ queryKey: ["payments"], queryFn: fetchPayments });
   const canConfirm = useMemo(() => {
     return Boolean(gameId && paymentMethod && proof);
   }, [gameId, paymentMethod, proof]);
@@ -61,6 +64,18 @@ export const Checkout = () => {
             </button>
           ))}
         </div>
+        {paymentMethod === "DC" && payments?.dc && (
+          <div className="requisites">
+            <div className="requisites-title">DC реквизиты</div>
+            <div className="requisites-body">{payments.dc}</div>
+          </div>
+        )}
+        {paymentMethod === "Карта" && payments?.card && (
+          <div className="requisites">
+            <div className="requisites-title">Реквизиты карты</div>
+            <div className="requisites-body">{payments.card}</div>
+          </div>
+        )}
       </div>
       <div className="section">
         <label>Чек (обязательно)</label>

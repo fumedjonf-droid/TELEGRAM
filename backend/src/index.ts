@@ -1,5 +1,5 @@
 import { config } from "./config.js";
-import { createBot, registerOrderActions, sendOrderToAdminGroup } from "./bot/index.js";
+import { createBot, registerOrderActions, startOutboxWorker } from "./bot/index.js";
 import { createServer } from "./api/server.js";
 import { getDb, nowIso } from "./db/index.js";
 import pino from "pino";
@@ -18,9 +18,8 @@ if (!existingOwner) {
 
 const bot = createBot();
 registerOrderActions(bot);
-const app = createServer({
-  notifyOrderPaidReview: (orderId) => sendOrderToAdminGroup(bot, orderId),
-});
+startOutboxWorker(bot);
+const app = createServer();
 
 app.listen(config.PORT, () => {
   logger.info(`API listening on :${config.PORT}`);

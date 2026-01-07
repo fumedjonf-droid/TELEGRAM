@@ -1,6 +1,7 @@
 import { Telegraf, Markup } from "telegraf";
 import { config } from "../config.js";
 import { getDb, nowIso } from "../db/index.js";
+import { deletePaymentSetting, getNumericSetting, getPaymentSettings, setPaymentSetting } from "../services/settings.js";
 
 const HELP_TEXT = `
 /help — показать список команд (Owner/Admin/Moderator)
@@ -13,12 +14,18 @@ const HELP_TEXT = `
 /order <id> — детали заказа (Admin/Owner/Moderator)
 /send <telegram_id> <text> — сообщение одному пользователю (Admin/Owner)
 /broadcast <text> — рассылка всем (Owner)
+/payments — показать реквизиты (Admin/Owner)
+/setpayment <dc|card|qr> — установить реквизиты (Admin/Owner)
+/delpayment <dc|card|qr> — удалить реквизиты (Admin/Owner)
 /grant <telegram_id> <role> — выдать доступ (Owner)
 /revoke <telegram_id> — забрать доступ (Owner)
 /admins — список админов/ролей (Owner)
 `.trim();
 
 type Role = "owner" | "admin" | "moderator";
+type PendingPayment = { type: "dc" | "card" | "qr" };
+
+const pendingPayments = new Map<string, PendingPayment>();
 
 const requireAdminChat = async (ctx: any, next: () => Promise<void>) => {
   if (!ctx.chat) {
@@ -136,6 +143,63 @@ export const createBot = () => {
     await ctx.reply(list);
   });
 
+  bot.command("payments", requireAdminChat, requireRole(["owner", "admin"]), async (ctx) => {
+    const payments = getPaymentSettings();
+    const message = [
+      `DC: ${payments.dc ?? "не задано"}`,
+      `Card: ${payments.card ?? "не задано"}`,
+      `QR: ${payments.qr ?? "не задано"}`,
+    ].join("\n");
+    await ctx.reply(message);
+  });
+
+  bot.command("setpayment", requireAdminChat, requireRole(["owner", "admin"]), async (ctx) => {
+    const [_, type] = ctx.message.text.split(" ");
+    if (!type || !["dc", "card", "qr"].includes(type)) {
+      await ctx.reply("Использование: /setpayment <dc|card|qr>");
+      return;
+    }
+    pendingPayments.set(String(ctx.from.id), { type: type as PendingPayment["type"] });
+    await ctx.reply(`Отправьте ${type === "qr" ? "фото" : "текст"} реквизитов для ${type}.`);
+  });
+
+  bot.command("delpayment", requireAdminChat, requireRole(["owner", "admin"]), async (ctx) => {
+    const [_, type] = ctx.message.text.split(" ");
+    if (!type || !["dc", "card", "qr"].includes(type)) {
+      await ctx.reply("Использование: /delpayment <dc|card|qr>");
+      return;
+    }
+    deletePaymentSetting(type as PendingPayment["type"], String(ctx.from.id));
+    await ctx.reply(`✅ Реквизиты ${type} удалены.`);
+  });
+
+  bot.on(["text", "photo"], requireAdminChat, requireRole(["owner", "admin"]), async (ctx) => {
+    const pending = pendingPayments.get(String(ctx.from.id));
+    if (!pending) {
+      return;
+    }
+    if (pending.type === "qr") {
+      const photos = ctx.message.photo;
+      if (!photos?.length) {
+        await ctx.reply("Отправьте фото QR.");
+        return;
+      }
+      const fileId = photos[photos.length - 1].file_id;
+      setPaymentSetting("qr", fileId, String(ctx.from.id));
+      pendingPayments.delete(String(ctx.from.id));
+      await ctx.reply("✅ QR реквизиты обновлены.");
+      return;
+    }
+    const text = ctx.message.text?.trim();
+    if (!text) {
+      await ctx.reply("Отправьте текст реквизитов.");
+      return;
+    }
+    setPaymentSetting(pending.type, text, String(ctx.from.id));
+    pendingPayments.delete(String(ctx.from.id));
+    await ctx.reply(`✅ Реквизиты ${pending.type} обновлены.`);
+  });
+
   return bot;
 };
 
@@ -223,7 +287,11 @@ export const registerOrderActions = (bot: Telegraf) => {
     const admin = db
       .prepare("SELECT role FROM admins WHERE telegram_id = ?")
       .get(String(ctx.from.id)) as { role: Role } | undefined;
-    if (!admin || (status === "approved" || status === "rejected") && admin.role === "moderator") {
+    if (!admin) {
+      await ctx.answerCbQuery("Нет прав.");
+      return;
+    }
+    if (admin.role === "moderator" && status !== "awaiting_proof") {
       await ctx.answerCbQuery("Нет прав.");
       return;
     }
@@ -275,4 +343,61 @@ export const registerOrderActions = (bot: Telegraf) => {
   bot.action(/order:complete:(\d+)/, async (ctx) => {
     await handleStatusChange(ctx, "completed", "complete");
   });
+};
+
+export const startOutboxWorker = (bot: Telegraf) => {
+  const processOutbox = async () => {
+    const db = getDb();
+    const events = db
+      .prepare(
+        "SELECT id, order_id as orderId FROM order_outbox WHERE event_type = 'order_ready_for_review' AND processed_at IS NULL LIMIT 5"
+      )
+      .all() as { id: number; orderId: number }[];
+    if (!events.length) {
+      return;
+    }
+    for (const event of events) {
+      await sendOrderToAdminGroup(bot, event.orderId);
+      db.prepare("UPDATE order_outbox SET processed_at = ? WHERE id = ?").run(nowIso(), event.id);
+    }
+  };
+
+  const processAutoActions = async () => {
+    const remindMinutes = getNumericSetting("auto_remind_minutes", 15);
+    const cancelMinutes = getNumericSetting("auto_cancel_minutes", 60);
+    const db = getDb();
+    const now = Date.now();
+    const orders = db
+      .prepare(
+        "SELECT orders.id, orders.created_at as createdAt, orders.reminder_sent_at as reminderSentAt, users.telegram_id as telegramId FROM orders JOIN users ON users.id = orders.user_id WHERE orders.status IN ('pending', 'awaiting_proof')"
+      )
+      .all() as { id: number; createdAt: string; reminderSentAt?: string | null; telegramId: string }[];
+
+    for (const order of orders) {
+      const createdAt = Date.parse(order.createdAt);
+      const diffMinutes = (now - createdAt) / 60000;
+      if (diffMinutes >= cancelMinutes) {
+        db.prepare("UPDATE orders SET status = ?, updated_at = ? WHERE id = ?").run(
+          "canceled",
+          nowIso(),
+          order.id
+        );
+        await bot.telegram.sendMessage(
+          order.telegramId,
+          `Заказ #${order.id} отменён из-за отсутствия чека.`
+        );
+      } else if (diffMinutes >= remindMinutes && !order.reminderSentAt) {
+        await bot.telegram.sendMessage(
+          order.telegramId,
+          `Напоминание: отправьте чек по заказу #${order.id}, чтобы продолжить обработку.`
+        );
+        db.prepare("UPDATE orders SET reminder_sent_at = ? WHERE id = ?").run(nowIso(), order.id);
+      }
+    }
+  };
+
+  setInterval(() => {
+    processOutbox().catch(() => null);
+    processAutoActions().catch(() => null);
+  }, 30_000);
 };
