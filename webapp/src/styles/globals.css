@@ -1,0 +1,143 @@
+:root {
+  font-family: "Inter", system-ui, sans-serif;
+  color: #0f172a;
+  background-color: #f8fafc;
+}
+
+body {
+  margin: 0;
+  background: #f8fafc;
+}
+
+.page {
+  padding: 16px;
+  min-height: 100vh;
+}
+
+.app-header {
+  display: flex;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.logo {
+  font-weight: 700;
+  font-size: 20px;
+}
+
+.search {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  margin-bottom: 12px;
+}
+
+.category-bar {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 8px;
+}
+
+.category-pill {
+  border: none;
+  background: #e2e8f0;
+  padding: 8px 12px;
+  border-radius: 999px;
+}
+
+.category-pill.active {
+  background: #0f172a;
+  color: white;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 12px;
+}
+
+.card {
+  background: white;
+  border-radius: 16px;
+  padding: 12px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+}
+
+.card-image img {
+  width: 100%;
+  border-radius: 12px;
+  object-fit: cover;
+}
+
+.card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.button {
+  border: none;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: #e2e8f0;
+}
+
+.button.primary {
+  background: #2563eb;
+  color: white;
+}
+
+.bottom-cart-bar {
+  position: sticky;
+  bottom: 12px;
+  margin-top: 16px;
+  background: white;
+  border-radius: 16px;
+  padding: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
+}
+
+.section {
+  margin-bottom: 16px;
+}
+
+.payment-grid {
+  display: flex;
+  gap: 8px;
+}
+
+.payment-tile {
+  padding: 8px 12px;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  background: white;
+}
+
+.payment-tile.active {
+  border-color: #2563eb;
+  background: #dbeafe;
+}
+
+.hint {
+  color: #ef4444;
+}
+
+.skeleton {
+  padding: 16px;
+  background: #e2e8f0;
+  border-radius: 12px;
+}
+
+.cart-list {
+  list-style: none;
+  padding: 0;
+}
+
+.total {
+  font-weight: 600;
+}
