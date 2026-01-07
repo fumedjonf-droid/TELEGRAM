@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MYGA WebApp</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Montserrat:wght@500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  </head>
+  <body>
+    <div class="app">
+      <header class="app-header" id="appHeader">
+        <button class="icon-button" id="backButton" aria-label="Назад">←</button>
+        <h1 id="headerTitle">Каталог игр</h1>
+      </header>
+
+      <main id="appContent"></main>
+    </div>
+
+    <template id="gamesView">
+      <section class="games-view">
+        <div class="hero-banner">
+          <div class="hero-overlay"></div>
+          <div class="hero-title">MYGA</div>
+        </div>
+        <section class="grid games-grid" data-view="games"></section>
+      </section>
+    </template>
+
+    <template id="productsView">
+      <section class="products-view">
+        <div class="section-toolbar">
+          <button class="chip-button is-active" type="button">Все игры</button>
+          <button class="chip-button" type="button">M4GA</button>
+        </div>
+        <div class="grid products-grid" data-view="products"></div>
+        <div class="sticky-cta" data-role="purchase-cta" hidden>
+          <button class="primary-button" id="purchaseButton"></button>
+        </div>
+      </section>
+    </template>
+
+    <template id="checkoutView">
+      <section class="checkout">
+        <div class="card">
+          <h2>Ваш заказ</h2>
+          <div class="order-line" data-role="order-game"></div>
+          <div class="order-line" data-role="order-product"></div>
+          <div class="order-line" data-role="order-price"></div>
+        </div>
+
+        <div class="card">
+          <h2>Player ID</h2>
+          <div class="field-group">
+            <label for="playerId">Введите Player ID</label>
+            <input id="playerId" type="text" placeholder="Например 12345678" />
+          </div>
+          <div class="verified" data-role="player-summary" hidden></div>
+          <button class="secondary-button" id="verifyButton">Проверить ID</button>
+        </div>
+
+        <div class="card" data-role="payment-section" aria-disabled="true">
+          <h2>Способ оплаты</h2>
+          <div class="payment-grid" id="paymentMethods"></div>
+        </div>
+
+        <button class="primary-button" id="proceedToPayment" hidden>
+          Перейти к оплате
+        </button>
+      </section>
+    </template>
+
+    <template id="paymentView">
+      <section class="payment">
+        <div class="card">
+          <h2>Заказ</h2>
+          <div class="order-line" data-role="payment-game"></div>
+          <div class="order-line" data-role="payment-product"></div>
+          <div class="order-line" data-role="payment-price"></div>
+          <div class="order-line" data-role="payment-code"></div>
+        </div>
+
+        <div class="card">
+          <h2>Реквизиты</h2>
+          <div class="order-line" data-role="payment-requisites"></div>
+          <div class="order-line" data-role="payment-bank"></div>
+          <div class="order-line" data-role="payment-recipient"></div>
+        </div>
+
+        <div class="card note">
+          <p>Скопируйте реквизиты и оплатите в приложении банка/кошелька.</p>
+          <p>Если есть комментарий — укажите код заказа.</p>
+        </div>
+
+        <div class="action-grid">
+          <button class="secondary-button" id="copyRequisites">Скопировать реквизиты</button>
+          <button class="secondary-button" id="copyCode">Скопировать код заказа</button>
+        </div>
+
+        <button class="primary-button" id="paidButton">Я оплатил</button>
+      </section>
+    </template>
+
+    <template id="proofView">
+      <section class="proof">
+        <div class="card">
+          <h2>Подтверждение оплаты</h2>
+          <div class="field-group">
+            <label for="receiptUpload">Скриншот чека/оплаты *</label>
+            <input id="receiptUpload" type="file" accept="image/*" />
+          </div>
+          <div class="field-group">
+            <label for="comment">Комментарий (опционально)</label>
+            <textarea id="comment" rows="3" placeholder="Например, время оплаты"></textarea>
+          </div>
+          <div class="field-group">
+            <label for="cardSuffix">Последние 4 цифры карты / время оплаты (опционально)</label>
+            <input id="cardSuffix" type="text" placeholder="1234" />
+          </div>
+        </div>
+
+        <button class="primary-button" id="submitProof">Отправить заявку</button>
+      </section>
+    </template>
+
+    <template id="statusView">
+      <section class="status">
+        <div class="card">
+          <h2>Заявка отправлена</h2>
+          <p>Ожидайте подтверждения администратора.</p>
+          <p class="muted" data-role="status-code"></p>
+        </div>
+      </section>
+    </template>
+
+    <script src="app.js"></script>
+  </body>
+</html>
