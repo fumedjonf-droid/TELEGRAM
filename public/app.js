@@ -331,7 +331,11 @@ function renderCheckout() {
     const order = await createOrder({
       gameId: state.selectedGame.id,
       productId: state.selectedProduct.id,
+      amount: state.selectedProduct.amount,
+      price: state.selectedProduct.price,
+      currency: "RUB",
       playerId: state.playerId,
+      nickname: state.nickname,
       paymentMethod: state.selectedPayment.id,
     });
 
@@ -411,7 +415,10 @@ async function verifyPlayer(gameId, playerId) {
   const response = await apiRequest("/api/verify-player", payload);
 
   if (response) {
-    return response;
+    return {
+      valid: response.ok,
+      nickname: response.nickname || "",
+    };
   }
 
   await new Promise((resolve) => setTimeout(resolve, 600));
@@ -426,7 +433,15 @@ async function createOrder(payload) {
   const response = await apiRequest("/api/orders", payload);
 
   if (response) {
-    return response;
+    return {
+      id: response.orderId,
+      code: response.orderCode,
+      requisites: {
+        requisites: response.requisites.number,
+        bank: response.requisites.bank,
+        recipient: response.requisites.recipient,
+      },
+    };
   }
 
   return {
