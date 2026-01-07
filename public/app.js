@@ -3,17 +3,28 @@ const games = [
     id: "free-fire",
     name: "Free Fire",
     description: "Алмазы и пополнение",
+    background: "url('https://images.unsplash.com/photo-1605902711622-cfb43c4437d1?auto=format&fit=crop&w=900&q=80')",
+    productImage: "assets/free-fire.svg",
     products: [
-      { id: "ff-100", amount: "100 алмазов", price: 149 },
-      { id: "ff-310", amount: "310 алмазов", price: 399 },
-      { id: "ff-520", amount: "520 алмазов", price: 699 },
-      { id: "ff-1060", amount: "1060 алмазов", price: 1299 },
+      { id: "ff-105", amount: "105 алмазов", price: 89 },
+      { id: "ff-326", amount: "326 алмазов", price: 239 },
+      { id: "ff-431", amount: "431 алмазов", price: 299 },
+      { id: "ff-546", amount: "546 алмазов", price: 399 },
+      { id: "ff-1133", amount: "1133 алмазов", price: 789 },
+      { id: "ff-1439", amount: "1439 алмазов", price: 999 },
+      { id: "ff-659", amount: "659 алмазов", price: 479 },
+      { id: "ff-2398", amount: "2398 алмазов", price: 1699 },
+      { id: "ff-6160", amount: "6160 алмазов", price: 4399 },
+      { id: "ff-12320", amount: "12320 алмазов", price: 8699 },
+      { id: "ff-18", amount: "18 алмазов", price: 29 },
+      { id: "ff-480", amount: "480 алмазов", price: 349 },
     ],
   },
   {
     id: "steam",
     name: "Steam",
     description: "Пополнение баланса",
+    background: "url('https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=900&q=80')",
     products: [
       { id: "steam-500", amount: "500 ₽", price: 550 },
       { id: "steam-1000", amount: "1000 ₽", price: 1090 },
@@ -24,11 +35,26 @@ const games = [
     id: "pubg",
     name: "PUBG Mobile",
     description: "UC пакеты",
+    background: "url('https://images.unsplash.com/photo-1488521787991-ed7bbaae773c?auto=format&fit=crop&w=900&q=80')",
     products: [
       { id: "pubg-60", amount: "60 UC", price: 119 },
       { id: "pubg-325", amount: "325 UC", price: 579 },
       { id: "pubg-660", amount: "660 UC", price: 1129 },
     ],
+  },
+  {
+    id: "tg-stars",
+    name: "TG Stars",
+    description: "Звезды Telegram",
+    background: "url('https://images.unsplash.com/photo-1520607162513-77705c0f0d4a?auto=format&fit=crop&w=900&q=80')",
+    products: [],
+  },
+  {
+    id: "mobile-legends",
+    name: "Mobile Legends",
+    description: "Diamonds",
+    background: "url('https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?auto=format&fit=crop&w=900&q=80')",
+    products: [],
   },
 ];
 
@@ -73,6 +99,7 @@ const state = {
 };
 
 const backButton = document.getElementById("backButton");
+const appHeader = document.getElementById("appHeader");
 const headerTitle = document.getElementById("headerTitle");
 const appContent = document.getElementById("appContent");
 
@@ -183,6 +210,9 @@ function updateHeader() {
     status: "Статус заказа",
   };
   headerTitle.textContent = titles[state.currentView] || "";
+  if (appHeader) {
+    appHeader.style.display = state.currentView === "games" ? "none" : "flex";
+  }
 }
 
 function renderGames() {
@@ -191,7 +221,8 @@ function renderGames() {
     const card = document.createElement("button");
     card.type = "button";
     card.className = "game-card";
-    card.innerHTML = `<h3>${game.name}</h3><p>${game.description}</p>`;
+    card.style.setProperty("--game-bg", game.background || "none");
+    card.innerHTML = `<div><h3>${game.name}</h3><p>${game.description}</p></div>`;
     card.addEventListener("click", () => {
       state.selectedGame = game;
       state.selectedProduct = null;
@@ -206,17 +237,33 @@ function renderProducts() {
   const purchaseCta = appContent.querySelector("[data-role='purchase-cta']");
   const purchaseButton = appContent.querySelector("#purchaseButton");
 
+  grid.innerHTML = "";
+
+  if (!state.selectedGame.products.length) {
+    const empty = document.createElement("div");
+    empty.className = "empty-state";
+    empty.textContent = "Каталог скоро появится. Следите за обновлениями!";
+    grid.appendChild(empty);
+    purchaseCta.hidden = true;
+    return;
+  }
+
   state.selectedGame.products.forEach((product) => {
     const card = document.createElement("div");
     card.className = "product-card";
     card.innerHTML = `
-      <h3>${product.amount}</h3>
-      <p>${state.selectedGame.name}</p>
-      <div class="product-meta">
-        <strong>${product.price} ₽</strong>
-        <button class="secondary-button" type="button">${
-          state.selectedProduct?.id === product.id ? "Выбрано" : "Выбрать"
-        }</button>
+      <div class="product-card__image">
+        <img src="${state.selectedGame.productImage || "assets/free-fire.svg"}" alt="${product.amount}" />
+      </div>
+      <div>
+        <h3>${product.amount}</h3>
+        <p>${state.selectedGame.name}</p>
+        <div class="product-meta">
+          <strong>${product.price} ₽</strong>
+          <button class="secondary-button" type="button">${
+            state.selectedProduct?.id === product.id ? "Выбрано" : "Выбрать"
+          }</button>
+        </div>
       </div>
     `;
 

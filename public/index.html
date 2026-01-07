@@ -3,13 +3,19 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Telegram WebApp Donat</title>
+    <title>MYGA WebApp</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Montserrat:wght@500;600;700&display=swap"
+      rel="stylesheet"
+    />
     <link rel="stylesheet" href="styles.css" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
   </head>
   <body>
     <div class="app">
-      <header class="app-header">
+      <header class="app-header" id="appHeader">
         <button class="icon-button" id="backButton" aria-label="Назад">←</button>
         <h1 id="headerTitle">Каталог игр</h1>
       </header>
@@ -18,12 +24,22 @@
     </div>
 
     <template id="gamesView">
-      <section class="grid" data-view="games"></section>
+      <section class="games-view">
+        <div class="hero-banner">
+          <div class="hero-overlay"></div>
+          <div class="hero-title">MYGA</div>
+        </div>
+        <section class="grid games-grid" data-view="games"></section>
+      </section>
     </template>
 
     <template id="productsView">
-      <section>
-        <div class="grid" data-view="products"></div>
+      <section class="products-view">
+        <div class="section-toolbar">
+          <button class="chip-button is-active" type="button">Все игры</button>
+          <button class="chip-button" type="button">M4GA</button>
+        </div>
+        <div class="grid products-grid" data-view="products"></div>
         <div class="sticky-cta" data-role="purchase-cta" hidden>
           <button class="primary-button" id="purchaseButton"></button>
         </div>
