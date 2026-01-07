@@ -65,7 +65,11 @@ const state = {
   nickname: "",
   playerVerified: false,
   selectedPayment: null,
+  orderId: "",
   orderCode: "",
+  requisites: null,
+  user: null,
+  initData: "",
 };
 
 const backButton = document.getElementById("backButton");
@@ -104,6 +108,36 @@ function closeWebApp() {
   const telegram = window.Telegram?.WebApp;
   if (telegram?.close) {
     telegram.close();
+    return;
+  }
+  window.close();
+}
+
+function initTelegram() {
+  const telegram = window.Telegram?.WebApp;
+  if (!telegram) return;
+
+  telegram.ready();
+  telegram.expand();
+
+  state.initData = telegram.initData || "";
+  state.user = telegram.initDataUnsafe?.user || null;
+
+  telegram.BackButton.onClick(() => {
+    popView();
+  });
+
+  updateTelegramBackButton();
+}
+
+function updateTelegramBackButton() {
+  const telegram = window.Telegram?.WebApp;
+  if (!telegram?.BackButton) return;
+
+  if (state.currentView === "games") {
+    telegram.BackButton.hide();
+  } else {
+    telegram.BackButton.show();
   }
 }
 
@@ -135,6 +169,8 @@ function render() {
   if (state.currentView === "status") {
     renderStatus();
   }
+
+  updateTelegramBackButton();
 }
 
 function updateHeader() {
@@ -289,9 +325,20 @@ function renderCheckout() {
 
   updateProceedButton(proceedButton);
 
-  proceedButton.addEventListener("click", () => {
+  proceedButton.addEventListener("click", async () => {
     if (!state.playerVerified || !state.selectedPayment) return;
-    state.orderCode = generateOrderCode();
+
+    const order = await createOrder({
+      gameId: state.selectedGame.id,
+      productId: state.selectedProduct.id,
+      playerId: state.playerId,
+      paymentMethod: state.selectedPayment.id,
+    });
+
+    state.orderId = order.id;
+    state.orderCode = order.code;
+    state.requisites = order.requisites;
+
     pushView("payment");
   });
 }
@@ -301,7 +348,7 @@ function updateProceedButton(button) {
 }
 
 function renderPayment() {
-  const requisites = state.selectedPayment;
+  const requisites = state.requisites || state.selectedPayment;
 
   appContent.querySelector("[data-role='payment-game']").textContent = `Игра: ${state.selectedGame.name}`;
   appContent.querySelector("[data-role='payment-product']").textContent = `Товар: ${state.selectedProduct.amount}`;
@@ -328,12 +375,28 @@ function renderPayment() {
 function renderProof() {
   const submitButton = appContent.querySelector("#submitProof");
   const receiptUpload = appContent.querySelector("#receiptUpload");
+  const commentInput = appContent.querySelector("#comment");
+  const cardSuffixInput = appContent.querySelector("#cardSuffix");
 
-  submitButton.addEventListener("click", () => {
+  submitButton.addEventListener("click", async () => {
     if (!receiptUpload.files.length) {
       receiptUpload.focus();
       return;
     }
+
+    submitButton.disabled = true;
+    submitButton.textContent = "Отправляем...";
+
+    await submitPaymentProof({
+      orderId: state.orderId,
+      receipt: receiptUpload.files[0],
+      comment: commentInput.value.trim(),
+      cardSuffix: cardSuffixInput.value.trim(),
+    });
+
+    submitButton.disabled = false;
+    submitButton.textContent = "Отправить заявку";
+
     pushView("status");
   });
 }
@@ -344,12 +407,54 @@ function renderStatus() {
 }
 
 async function verifyPlayer(gameId, playerId) {
+  const payload = { gameId, playerId };
+  const response = await apiRequest("/api/verify-player", payload);
+
+  if (response) {
+    return response;
+  }
+
   await new Promise((resolve) => setTimeout(resolve, 600));
 
   const simpleCheck = /\d{6,}/.test(playerId);
   const nickname = simpleCheck && gameId === "free-fire" ? `FF-${playerId.slice(-4)}` : "";
 
   return { valid: simpleCheck, nickname };
+}
+
+async function createOrder(payload) {
+  const response = await apiRequest("/api/orders", payload);
+
+  if (response) {
+    return response;
+  }
+
+  return {
+    id: crypto.randomUUID(),
+    code: generateOrderCode(),
+    requisites: state.selectedPayment,
+  };
+}
+
+async function submitPaymentProof({ orderId, receipt, comment, cardSuffix }) {
+  if (!orderId) return;
+
+  const formData = new FormData();
+  formData.append("receipt", receipt);
+  formData.append("comment", comment);
+  formData.append("cardSuffix", cardSuffix);
+  formData.append("initData", state.initData);
+
+  const response = await fetch(`/api/orders/${orderId}/proof`, {
+    method: "POST",
+    body: formData,
+  });
+
+  if (!response.ok) {
+    return false;
+  }
+
+  return response.json();
 }
 
 function generateOrderCode() {
@@ -366,4 +471,29 @@ async function copyToClipboard(value) {
 
 backButton.addEventListener("click", popView);
 
+async function apiRequest(url, payload) {
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Telegram-InitData": state.initData,
+      },
+      body: JSON.stringify({
+        ...payload,
+        telegramUserId: state.user?.id || null,
+      }),
+    });
+
+    if (!response.ok) {
+      return null;
+    }
+
+    return await response.json();
+  } catch (error) {
+    return null;
+  }
+}
+
+initTelegram();
 render();
