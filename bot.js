@@ -62,6 +62,10 @@ bot.start((ctx) => {
     );
   }
 
+  if (ctx.chat?.type !== "private") {
+    return ctx.reply("Откройте магазин в личном чате с ботом.");
+  }
+
   return ctx.reply(
     "Добро пожаловать!",
     Markup.inlineKeyboard([
