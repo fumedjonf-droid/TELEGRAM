@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS admins (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   telegram_id TEXT UNIQUE NOT NULL,
-  role TEXT NOT NULL,
+  role TEXT NOT NULL CHECK(role IN ('owner', 'admin', 'moderator')),
   added_by TEXT NOT NULL,
   created_at TEXT NOT NULL
 );
@@ -42,12 +42,13 @@ CREATE TABLE IF NOT EXISTS orders (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER NOT NULL,
   game_id TEXT NOT NULL,
-  status TEXT NOT NULL,
+  status TEXT NOT NULL CHECK(status IN ('pending', 'awaiting_proof', 'paid_review', 'approved', 'rejected', 'completed', 'canceled')),
   total_amount INTEGER NOT NULL,
   payment_method TEXT NOT NULL,
   proof_file_id TEXT,
   proof_type TEXT,
   proof_received_at TEXT,
+  proof_path TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   FOREIGN KEY (user_id) REFERENCES users(id)

@@ -8,6 +8,7 @@ type RequiredEnv = {
   ADMIN_GROUP_ID: string;
   SQLITE_PATH: string;
   OWNER_TELEGRAM_ID: string;
+  WEBAPP_ORIGIN: string;
 };
 
 const required = [
@@ -16,6 +17,7 @@ const required = [
   "ADMIN_GROUP_ID",
   "SQLITE_PATH",
   "OWNER_TELEGRAM_ID",
+  "WEBAPP_ORIGIN",
 ] as const;
 
 for (const key of required) {
@@ -30,5 +32,6 @@ export const config: RequiredEnv & { PORT: number } = {
   ADMIN_GROUP_ID: process.env.ADMIN_GROUP_ID as string,
   SQLITE_PATH: process.env.SQLITE_PATH as string,
   OWNER_TELEGRAM_ID: process.env.OWNER_TELEGRAM_ID as string,
+  WEBAPP_ORIGIN: process.env.WEBAPP_ORIGIN as string,
   PORT: Number(process.env.PORT ?? 3000),
 };

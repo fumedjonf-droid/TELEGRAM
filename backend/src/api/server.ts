@@ -1,15 +1,75 @@
 import express from "express";
 import multer from "multer";
+import path from "path";
+import fs from "fs";
+import helmet from "helmet";
+import cors from "cors";
+import rateLimit from "express-rate-limit";
 import { config } from "../config.js";
 import { getDb, nowIso } from "../db/index.js";
 import { isValidGameId, isValidQuantity } from "../utils/validators.js";
 import { parseUserFromInitData, validateInitData } from "../services/telegramAuth.js";
 
-const upload = multer({ storage: multer.memoryStorage() });
+const uploadsDir = path.resolve("uploads");
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
 
-export const createServer = () => {
+const upload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, uploadsDir),
+    filename: (_req, file, cb) => cb(null, `${Date.now()}-${file.originalname}`),
+  }),
+  limits: { fileSize: 5 * 1024 * 1024, files: 1 },
+  fileFilter: (_req, file, cb) => {
+    const allowed = ["image/jpeg", "image/png", "application/pdf"];
+    if (!allowed.includes(file.mimetype)) {
+      cb(new Error("unsupported_file_type"));
+      return;
+    }
+    cb(null, true);
+  },
+});
+
+type AuthedRequest = express.Request & { user?: { telegramId: string; username?: string } };
+
+type ServerDeps = {
+  notifyOrderPaidReview: (orderId: number) => Promise<void>;
+};
+
+const requireTelegramAuth = (req: AuthedRequest, res: express.Response, next: express.NextFunction) => {
+  const initData = req.header("X-TG-INIT-DATA");
+  if (!initData || !validateInitData(initData, config.BOT_TOKEN)) {
+    return res.status(401).json({ error: "invalid_init_data" });
+  }
+  const user = parseUserFromInitData(initData);
+  if (!user) {
+    return res.status(400).json({ error: "missing_user" });
+  }
+  req.user = { telegramId: user.id, username: user.username };
+  next();
+};
+
+export const createServer = ({ notifyOrderPaidReview }: ServerDeps) => {
   const app = express();
+  app.use(helmet());
+  app.use(
+    cors({
+      origin: config.WEBAPP_ORIGIN,
+      credentials: true,
+    })
+  );
+  app.use(
+    rateLimit({
+      windowMs: 10 * 60 * 1000,
+      limit: 60,
+    })
+  );
   app.use(express.json());
+
+  app.get("/health", (_req, res) => {
+    res.json({ ok: true });
+  });
 
   app.post("/api/auth/telegram", (req, res) => {
     const { initData } = req.body as { initData?: string };
@@ -56,15 +116,14 @@ export const createServer = () => {
     res.json(categories);
   });
 
-  app.post("/api/orders", (req, res) => {
-    const { telegramId, gameId, paymentMethod, items } = req.body as {
-      telegramId?: string;
+  app.post("/api/orders", requireTelegramAuth, (req: AuthedRequest, res) => {
+    const { gameId, paymentMethod, items } = req.body as {
       gameId?: string;
       paymentMethod?: string;
       items?: { itemId: number; qty: number }[];
     };
 
-    if (!telegramId || !gameId || !paymentMethod || !items?.length) {
+    if (!req.user || !gameId || !paymentMethod || !items?.length) {
       return res.status(400).json({ error: "missing_fields" });
     }
     if (!isValidGameId(gameId)) {
@@ -74,7 +133,7 @@ export const createServer = () => {
     const db = getDb();
     const user = db
       .prepare("SELECT id FROM users WHERE telegram_id = ?")
-      .get(telegramId) as { id: number } | undefined;
+      .get(req.user.telegramId) as { id: number } | undefined;
     if (!user) {
       return res.status(404).json({ error: "user_not_found" });
     }
@@ -125,7 +184,7 @@ export const createServer = () => {
     return res.json({ orderId, status: "pending", totalAmount: total });
   });
 
-  app.post("/api/orders/:id/proof", upload.single("file"), (req, res) => {
+  app.post("/api/orders/:id/proof", requireTelegramAuth, upload.single("file"), (req: AuthedRequest, res) => {
     const orderId = Number(req.params.id);
     const { proofFileId, proofType } = req.body as { proofFileId?: string; proofType?: string };
 
@@ -138,14 +197,26 @@ export const createServer = () => {
     }
 
     const db = getDb();
-    const proofValue = proofFileId ?? "uploaded";
-    const typeValue = proofType ?? (req.file ? "file" : null);
+    const order = db
+      .prepare(
+        "SELECT orders.id, users.telegram_id as telegramId FROM orders JOIN users ON users.id = orders.user_id WHERE orders.id = ?"
+      )
+      .get(orderId) as { id: number; telegramId: string } | undefined;
+    if (!order) {
+      return res.status(404).json({ error: "order_not_found" });
+    }
+    if (!req.user || order.telegramId !== req.user.telegramId) {
+      return res.status(403).json({ error: "forbidden" });
+    }
+    const proofValue = proofFileId ?? null;
+    const typeValue = proofType ?? (req.file ? req.file.mimetype : null);
+    const proofPath = req.file ? req.file.path : null;
     const now = nowIso();
     const updated = db
       .prepare(
-        "UPDATE orders SET proof_file_id = ?, proof_type = ?, proof_received_at = ?, updated_at = ? WHERE id = ?"
+        "UPDATE orders SET proof_file_id = ?, proof_type = ?, proof_received_at = ?, proof_path = ?, updated_at = ? WHERE id = ?"
       )
-      .run(proofValue, typeValue, now, now, orderId);
+      .run(proofValue, typeValue, now, proofPath, now, orderId);
 
     if (updated.changes === 0) {
       return res.status(404).json({ error: "order_not_found" });
@@ -154,20 +225,27 @@ export const createServer = () => {
     return res.json({ ok: true });
   });
 
-  app.post("/api/orders/:id/mark-paid", (req, res) => {
+  app.post("/api/orders/:id/mark-paid", requireTelegramAuth, async (req: AuthedRequest, res) => {
     const orderId = Number(req.params.id);
     if (!orderId) {
       return res.status(400).json({ error: "invalid_order" });
     }
     const db = getDb();
     const order = db
-      .prepare("SELECT proof_file_id as proofFileId, status FROM orders WHERE id = ?")
-      .get(orderId) as { proofFileId?: string; status: string } | undefined;
+      .prepare(
+        "SELECT orders.id, orders.proof_file_id as proofFileId, orders.proof_path as proofPath, orders.status, users.telegram_id as telegramId FROM orders JOIN users ON users.id = orders.user_id WHERE orders.id = ?"
+      )
+      .get(orderId) as
+      | { proofFileId?: string; proofPath?: string | null; status: string; telegramId: string }
+      | undefined;
 
     if (!order) {
       return res.status(404).json({ error: "order_not_found" });
     }
-    if (!order.proofFileId) {
+    if (!req.user || order.telegramId !== req.user.telegramId) {
+      return res.status(403).json({ error: "forbidden" });
+    }
+    if (!order.proofFileId && !order.proofPath) {
       return res.status(400).json({
         error: "proof_required",
         message:
@@ -181,7 +259,28 @@ export const createServer = () => {
       now,
       orderId
     );
+    await notifyOrderPaidReview(orderId);
     return res.json({ ok: true, status: "paid_review" });
+  });
+
+  app.get("/api/orders/my", requireTelegramAuth, (req: AuthedRequest, res) => {
+    if (!req.user) {
+      return res.status(401).json({ error: "unauthorized" });
+    }
+    const db = getDb();
+    const orders = db
+      .prepare(
+        "SELECT orders.id, orders.status, orders.total_amount as totalAmount, orders.created_at as createdAt FROM orders JOIN users ON users.id = orders.user_id WHERE users.telegram_id = ? ORDER BY orders.created_at DESC"
+      )
+      .all(req.user.telegramId);
+    res.json(orders);
+  });
+
+  app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    if (err.message === "unsupported_file_type") {
+      return res.status(400).json({ error: "unsupported_file_type" });
+    }
+    return res.status(500).json({ error: "internal_error" });
   });
 
   return app;
