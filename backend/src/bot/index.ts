@@ -179,11 +179,12 @@ export const sendOrderToAdminGroup = async (bot: Telegraf, orderId: number) => {
   const itemLines = items.map((item) => `${item.name} × ${item.qty} (${item.priceSnapshot})`).join("\n");
   const userLabel = order.username ? `@${order.username}` : order.telegramId;
   const message = [
-    `Заказ #${order.id}`,
-    `Пользователь: ${userLabel}`,
-    `Игровой ID: ${order.gameId}`,
-    `Сумма: ${order.totalAmount}`,
-    `Метод оплаты: ${order.paymentMethod}`,
+    `🧾 Заказ #${order.id}`,
+    `👤 ${userLabel}`,
+    `🎮 ID: ${order.gameId}`,
+    `💰 Сумма: ${order.totalAmount}`,
+    `💳 Оплата: ${order.paymentMethod}`,
+    `📎 Чек: ${order.proofFileId || order.proofPath ? "есть" : "нет"}`,
     `Статус: ${order.status}`,
     `Создан: ${order.createdAt}`,
     `Товары:\n${itemLines}`,

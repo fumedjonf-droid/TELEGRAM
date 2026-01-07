@@ -12,6 +12,7 @@ body {
 .page {
   padding: 16px;
   min-height: 100vh;
+  position: relative;
 }
 
 .app-header {
@@ -54,7 +55,7 @@ body {
 
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 12px;
 }
 
@@ -75,6 +76,24 @@ body {
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+.card-title {
+  font-weight: 600;
+  font-size: 16px;
+}
+
+.card-description {
+  font-size: 13px;
+  color: #64748b;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.card-price {
+  font-size: 18px;
+  font-weight: 700;
 }
 
 .button {
@@ -128,9 +147,24 @@ body {
 }
 
 .skeleton {
-  padding: 16px;
-  background: #e2e8f0;
+  height: 200px;
   border-radius: 12px;
+  background: linear-gradient(90deg, #e2e8f0 0%, #f1f5f9 50%, #e2e8f0 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s infinite;
+}
+
+.shimmer {
+  animation: shimmer 1.4s infinite;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: 0% 50%;
+  }
+  100% {
+    background-position: 100% 50%;
+  }
 }
 
 .cart-list {
@@ -140,4 +174,164 @@ body {
 
 .total {
   font-weight: 600;
+}
+
+.welcome {
+  display: grid;
+  gap: 16px;
+  text-align: center;
+}
+
+.welcome-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.welcome-card {
+  background: white;
+  border-radius: 16px;
+  padding: 16px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: center;
+}
+
+.welcome-card .icon {
+  font-size: 24px;
+}
+
+.empty-state {
+  padding: 24px;
+  background: white;
+  border-radius: 16px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+  text-align: center;
+}
+
+.cart-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.4);
+}
+
+.cart-sheet {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: white;
+  border-radius: 24px 24px 0 0;
+  padding: 16px;
+  min-height: 40vh;
+}
+
+.sheet-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.sheet-handle {
+  width: 48px;
+  height: 4px;
+  background: #e2e8f0;
+  border-radius: 999px;
+}
+
+.cart-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 0;
+}
+
+.step-progress {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.step {
+  background: #e2e8f0;
+  border-radius: 999px;
+  padding: 6px 8px;
+  font-size: 12px;
+  text-align: center;
+}
+
+.step.active {
+  background: #2563eb;
+  color: white;
+}
+
+.proof-box {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 12px;
+  border-radius: 16px;
+  border: 1px dashed #cbd5f5;
+  background: #f8fafc;
+}
+
+.proof-box input {
+  margin-left: auto;
+}
+
+.proof-box.highlight {
+  border-color: #ef4444;
+}
+
+.proof-title {
+  font-weight: 600;
+}
+
+.proof-subtitle {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.trust-note {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+  color: #475569;
+  margin-top: 8px;
+}
+
+.timeline {
+  display: grid;
+  gap: 12px;
+}
+
+.timeline-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.timeline-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.timeline-label.active {
+  font-weight: 600;
+}
+
+.support-button {
+  position: fixed;
+  right: 16px;
+  bottom: 96px;
+  background: #0f172a;
+  color: white;
+  padding: 8px 12px;
+  border-radius: 999px;
+  text-decoration: none;
+  font-size: 12px;
 }

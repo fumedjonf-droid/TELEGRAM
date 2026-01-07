@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { PageContainer } from "../../components/layout/PageContainer";
 import { useCartStore } from "../../store/cart.store";
 import { formatMoney } from "../../utils/formatMoney";
+import { motion } from "framer-motion";
 
 const paymentMethods = ["DC", "Карта", "QR"] as const;
 
@@ -11,13 +12,27 @@ export const Checkout = () => {
   const [gameId, setGameId] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<string | null>(null);
   const [proof, setProof] = useState<File | null>(null);
+  const [attempted, setAttempted] = useState(false);
   const canConfirm = useMemo(() => {
     return Boolean(gameId && paymentMethod && proof);
   }, [gameId, paymentMethod, proof]);
 
+  const handleConfirm = () => {
+    if (!canConfirm) {
+      setAttempted(true);
+    }
+  };
+
   return (
     <PageContainer>
       <h2>Оформление заказа</h2>
+      <div className="step-progress">
+        {["Товары", "ID", "Оплата", "Подтверждение"].map((step, index) => (
+          <div key={step} className={`step ${index <= 2 ? "active" : ""}`}>
+            <span>{step}</span>
+          </div>
+        ))}
+      </div>
       <div className="section">
         <h3>Ваш заказ</h3>
         <ul>
@@ -49,15 +64,28 @@ export const Checkout = () => {
       </div>
       <div className="section">
         <label>Чек (обязательно)</label>
-        <input type="file" onChange={(event) => setProof(event.target.files?.[0] ?? null)} />
+        <div className={`proof-box ${attempted && !proof ? "highlight" : ""}`}>
+          <div className="proof-icon">{proof ? "✅" : "📎"}</div>
+          <div>
+            <div className="proof-title">
+              {proof ? "Чек получен" : "Прикрепите чек, чтобы мы начали проверку"}
+            </div>
+            <div className="proof-subtitle">Фото или файл оплаты</div>
+          </div>
+          <input type="file" onChange={(event) => setProof(event.target.files?.[0] ?? null)} />
+        </div>
       </div>
-      <button className="button primary" disabled={!canConfirm}>
+      <button className="button primary" disabled={!canConfirm} onClick={handleConfirm}>
         Я оплатил(а)
       </button>
-      {!canConfirm && (
-        <p className="hint">
+      <div className="trust-note">
+        <span>🔒</span>
+        <span>Оплата проверяется вручную администратором</span>
+      </div>
+      {!canConfirm && attempted && (
+        <motion.p className="hint" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
           Прикрепите чек и выберите метод оплаты, чтобы подтвердить заказ.
-        </p>
+        </motion.p>
       )}
     </PageContainer>
   );

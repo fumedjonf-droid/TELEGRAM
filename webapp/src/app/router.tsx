@@ -1,5 +1,6 @@
 import { createBrowserRouter, Outlet } from "react-router-dom";
 import { AnimatePresence } from "framer-motion";
+import { Welcome } from "../pages/Welcome";
 import { ShopHome } from "../pages/ShopHome";
 import { ProductDetails } from "../pages/ProductDetails";
 import { Cart } from "../pages/Cart";
@@ -19,7 +20,8 @@ export const router = createBrowserRouter([
   {
     element: <AnimatedLayout />,
     children: [
-      { path: "/", element: <ShopHome /> },
+      { path: "/", element: <Welcome /> },
+      { path: "/shop", element: <ShopHome /> },
       { path: "/product/:id", element: <ProductDetails /> },
       { path: "/cart", element: <Cart /> },
       { path: "/checkout", element: <Checkout /> },

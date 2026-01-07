@@ -17,6 +17,7 @@ export const ProductCard = ({ item }: { item: Item }) => {
       </div>
       <div className="card-body">
         <div className="card-title">{item.name}</div>
+        <div className="card-description">{item.description ?? "Популярный товар"}</div>
         <div className="card-price">{formatMoney(item.price)}</div>
         <button
           className="button"
