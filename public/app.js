@@ -114,16 +114,16 @@ function closeWebApp() {
 }
 
 function initTelegram() {
-  const telegram = window.Telegram?.WebApp;
-  if (!telegram) return;
+  const tg = window.Telegram?.WebApp;
+  if (!tg) return;
 
-  telegram.ready();
-  telegram.expand();
+  tg.ready();
+  tg.expand();
 
-  state.initData = telegram.initData || "";
-  state.user = telegram.initDataUnsafe?.user || null;
+  state.initData = tg.initData || "";
+  state.user = tg.initDataUnsafe?.user || null;
 
-  telegram.BackButton.onClick(() => {
+  tg.BackButton.onClick(() => {
     popView();
   });
 
@@ -510,5 +510,7 @@ async function apiRequest(url, payload) {
   }
 }
 
-initTelegram();
-render();
+document.addEventListener("DOMContentLoaded", () => {
+  initTelegram();
+  render();
+});
