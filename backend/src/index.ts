@@ -25,9 +25,26 @@ app.listen(config.PORT, () => {
   logger.info(`API listening on :${config.PORT}`);
 });
 
-bot.launch().then(() => {
-  logger.info("Bot started");
+const startBot = async () => {
+  try {
+    await bot.launch();
+    logger.info("Bot started");
+  } catch (err) {
+    logger.error({ err }, "Bot failed to start");
+    process.exit(1);
+  }
+};
+
+process.on("unhandledRejection", (err) => {
+  logger.error({ err }, "Unhandled promise rejection");
 });
+
+process.on("uncaughtException", (err) => {
+  logger.error({ err }, "Uncaught exception");
+  process.exit(1);
+});
+
+startBot();
 
 process.once("SIGINT", () => bot.stop("SIGINT"));
 process.once("SIGTERM", () => bot.stop("SIGTERM"));
