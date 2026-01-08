@@ -1,4 +1,4 @@
-export const isValidGameId = (value: string, min = 6, max = 16): boolean => {
+export const isValidGameId = (value: string, min = 5, max = 16): boolean => {
   if (!/^[0-9]+$/.test(value)) {
     return false;
   }

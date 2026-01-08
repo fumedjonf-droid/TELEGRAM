@@ -39,13 +39,19 @@ type PendingItem = {
 const pendingPayments = new Map<string, PendingPayment>();
 const pendingItems = new Map<string, PendingItem>();
 
+const logAdminAction = (adminId: string, action: string, note?: string | null, orderId?: number | null) => {
+  const db = getDb();
+  db.prepare(
+    "INSERT INTO admin_actions (order_id, admin_telegram_id, action, note, created_at) VALUES (?, ?, ?, ?, ?)"
+  ).run(orderId ?? null, adminId, action, note ?? null, nowIso());
+};
+
 const requireAdminChat = async (ctx: any, next: () => Promise<void>) => {
   if (!ctx.chat) {
     return;
   }
   const chatId = String(ctx.chat.id);
-  const isOwnerPrivate = ctx.chat.type === "private" && String(ctx.from?.id) === config.OWNER_TELEGRAM_ID;
-  if (chatId !== config.ADMIN_GROUP_ID && !isOwnerPrivate) {
+  if (chatId !== config.ADMIN_GROUP_ID) {
     await ctx.reply("❌ Команда доступна только в админ-группе.");
     return;
   }
@@ -199,6 +205,9 @@ export const createBot = () => {
       .map((item) => `#${item.id} • ${item.name} • ${item.price} • ${item.isActive ? "on" : "off"}`)
       .join("\n");
     await ctx.reply(message);
+    if (ctx.from) {
+      logAdminAction(String(ctx.from.id), "list_items");
+    }
   });
 
   bot.command("additem", requireAdminChat, requireRole(["owner", "admin"]), async (ctx) => {
@@ -242,6 +251,9 @@ export const createBot = () => {
     const db = getDb();
     db.prepare("DELETE FROM items WHERE id = ?").run(id);
     await ctx.reply(`✅ Товар #${id} удалён.`);
+    if (ctx.from) {
+      logAdminAction(String(ctx.from.id), "delete_item", `item:${id}`);
+    }
   });
 
   bot.command("toggleitem", requireAdminChat, requireRole(["owner", "admin"]), async (ctx) => {
@@ -262,6 +274,9 @@ export const createBot = () => {
     const next = item.isActive ? 0 : 1;
     db.prepare("UPDATE items SET is_active = ?, updated_at = ? WHERE id = ?").run(next, nowIso(), id);
     await ctx.reply(`✅ Товар #${id} теперь ${next ? "включён" : "выключен"}.`);
+    if (ctx.from) {
+      logAdminAction(String(ctx.from.id), "toggle_item", `item:${id}:${next ? "on" : "off"}`);
+    }
   });
 
   bot.command("grant", requireAdminChat, requireRole(["owner"]), async (ctx) => {
@@ -275,6 +290,9 @@ export const createBot = () => {
       "INSERT INTO admins (telegram_id, role, added_by, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(telegram_id) DO UPDATE SET role = excluded.role"
     ).run(telegramId, role, String(ctx.from.id), nowIso());
     await ctx.reply(`✅ Роль ${role} назначена ${telegramId}.`);
+    if (ctx.from) {
+      logAdminAction(String(ctx.from.id), "grant_admin", `${telegramId}:${role}`);
+    }
   });
 
   bot.command("revoke", requireAdminChat, requireRole(["owner"]), async (ctx) => {
@@ -290,6 +308,9 @@ export const createBot = () => {
     const db = getDb();
     db.prepare("DELETE FROM admins WHERE telegram_id = ?").run(telegramId);
     await ctx.reply(`✅ Доступ отозван у ${telegramId}.`);
+    if (ctx.from) {
+      logAdminAction(String(ctx.from.id), "revoke_admin", telegramId);
+    }
   });
 
   bot.command("admins", requireAdminChat, requireRole(["owner"]), async (ctx) => {
@@ -303,6 +324,9 @@ export const createBot = () => {
     }
     const list = admins.map((admin) => `${admin.telegramId} — ${admin.role}`).join("\n");
     await ctx.reply(list);
+    if (ctx.from) {
+      logAdminAction(String(ctx.from.id), "list_admins");
+    }
   });
 
   bot.command("send", requireAdminChat, requireRole(["owner", "admin"]), async (ctx) => {
@@ -315,6 +339,9 @@ export const createBot = () => {
     try {
       await bot.telegram.sendMessage(telegramId, text);
       await ctx.reply("✅ Сообщение отправлено.");
+      if (ctx.from) {
+        logAdminAction(String(ctx.from.id), "send_message", telegramId);
+      }
     } catch {
       await ctx.reply("❌ Не удалось отправить сообщение.");
     }
@@ -359,6 +386,9 @@ export const createBot = () => {
       }
     }
     await ctx.reply(`✅ Рассылка завершена. Успешно: ${sent}, ошибок: ${failed}, заблокировали: ${blocked}.`);
+    if (ctx.from) {
+      logAdminAction(String(ctx.from.id), "broadcast", `sent:${sent} failed:${failed} blocked:${blocked}`);
+    }
   });
 
   bot.command("payments", requireAdminChat, requireRole(["owner", "admin"]), async (ctx) => {
@@ -368,6 +398,9 @@ export const createBot = () => {
       `Card: ${payments.card ?? "не задано"}`,
     ].join("\n");
     await ctx.reply(message);
+    if (ctx.from) {
+      logAdminAction(String(ctx.from.id), "list_payments");
+    }
   });
 
   bot.command("setpayment", requireAdminChat, requireRole(["owner", "admin"]), async (ctx) => {
@@ -378,6 +411,9 @@ export const createBot = () => {
     }
     pendingPayments.set(String(ctx.from.id), { type: type as PendingPayment["type"] });
     await ctx.reply(`Отправьте текст реквизитов для ${type}.`);
+    if (ctx.from) {
+      logAdminAction(String(ctx.from.id), "set_payment_prompt", type);
+    }
   });
 
   bot.command("delpayment", requireAdminChat, requireRole(["owner", "admin"]), async (ctx) => {
@@ -388,6 +424,9 @@ export const createBot = () => {
     }
     deletePaymentSetting(type as PendingPayment["type"], String(ctx.from.id));
     await ctx.reply(`✅ Реквизиты ${type} удалены.`);
+    if (ctx.from) {
+      logAdminAction(String(ctx.from.id), "delete_payment", type);
+    }
   });
 
   bot.on(["text", "photo"], requireAdminChat, requireRole(["owner", "admin"]), async (ctx) => {
@@ -405,6 +444,7 @@ export const createBot = () => {
       setPaymentSetting(pending.type, text, String(ctx.from.id));
       pendingPayments.delete(String(ctx.from.id));
       await ctx.reply(`✅ Реквизиты ${pending.type} обновлены.`);
+      logAdminAction(String(ctx.from.id), "set_payment", pending.type);
       return;
     }
 
@@ -431,6 +471,7 @@ export const createBot = () => {
         });
         pendingItems.delete(String(ctx.from.id));
         await ctx.reply("✅ Товар добавлен.");
+        logAdminAction(String(ctx.from.id), "create_item", pendingItem.name ?? null);
       } else if (pendingItem.id) {
         updateItem(pendingItem.id, {
           name: pendingItem.name!,
@@ -441,6 +482,7 @@ export const createBot = () => {
         });
         pendingItems.delete(String(ctx.from.id));
         await ctx.reply("✅ Товар обновлён.");
+        logAdminAction(String(ctx.from.id), "update_item", `item:${pendingItem.id}`);
       }
       return;
     }
@@ -594,25 +636,31 @@ export const registerOrderActions = (bot: Telegraf) => {
       await ctx.answerCbQuery("Неверный заказ.");
       return;
     }
-    const now = nowIso();
-    const result = db
-      .prepare("UPDATE orders SET status = ?, updated_at = ? WHERE id = ? AND status = ?")
-      .run(status, now, orderId, expectedStatus);
-    if (result.changes === 0) {
+    const result = db.transaction(() => {
+      const now = nowIso();
+      const update = db
+        .prepare("UPDATE orders SET status = ?, updated_at = ? WHERE id = ? AND status = ?")
+        .run(status, now, orderId, expectedStatus);
+      if (update.changes === 0) {
+        return { error: true };
+      }
+      db.prepare(
+        "INSERT INTO admin_actions (order_id, admin_telegram_id, action, note, created_at) VALUES (?, ?, ?, ?, ?)"
+      ).run(orderId, String(ctx.from.id), action, note ?? null, now);
+
+      const orderUser = db
+        .prepare(
+          "SELECT users.telegram_id as telegramId FROM orders JOIN users ON users.id = orders.user_id WHERE orders.id = ?"
+        )
+        .get(orderId) as { telegramId: string } | undefined;
+      return { orderUser };
+    })();
+    if ("error" in result) {
       await ctx.reply("⚠️ Невозможно выполнить действие: статус заказа изменился или заказ не найден.");
       return;
     }
-    db.prepare(
-      "INSERT INTO admin_actions (order_id, admin_telegram_id, action, note, created_at) VALUES (?, ?, ?, ?, ?)"
-    ).run(orderId, String(ctx.from.id), action, note ?? null, now);
-
-    const orderUser = db
-      .prepare(
-        "SELECT users.telegram_id as telegramId FROM orders JOIN users ON users.id = orders.user_id WHERE orders.id = ?"
-      )
-      .get(orderId) as { telegramId: string } | undefined;
-    if (orderUser) {
-      await bot.telegram.sendMessage(orderUser.telegramId, `Заказ #${orderId} обновлён: ${status}.`);
+    if (result.orderUser) {
+      await bot.telegram.sendMessage(result.orderUser.telegramId, `Заказ #${orderId} обновлён: ${status}.`);
     }
     await ctx.answerCbQuery("Статус обновлён.");
   };

@@ -10,7 +10,7 @@ body {
 }
 
 .page {
-  padding: 16px;
+  padding: 16px 16px 120px;
   min-height: 100vh;
   position: relative;
 }
@@ -109,16 +109,18 @@ body {
 }
 
 .bottom-cart-bar {
-  position: sticky;
-  bottom: 12px;
-  margin-top: 16px;
+  position: fixed;
+  left: 16px;
+  right: 16px;
+  bottom: 16px;
   background: white;
-  border-radius: 16px;
-  padding: 12px;
+  border-radius: 18px;
+  padding: 14px;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
+  box-shadow: 0 14px 30px rgba(15, 23, 42, 0.18);
+  z-index: 20;
 }
 
 .cart-badge {

@@ -24,6 +24,9 @@ export const validateInitData = (initData: string, botToken: string, maxAgeSecon
     return false;
   }
   const nowSeconds = Math.floor(Date.now() / 1000);
+  if (authTimestamp > nowSeconds + 5) {
+    return false;
+  }
   if (nowSeconds - authTimestamp > maxAgeSeconds) {
     return false;
   }

@@ -33,6 +33,18 @@ export const getDb = (): Db => {
     dbInstance.exec(
       "CREATE INDEX IF NOT EXISTS idx_order_outbox_processed ON order_outbox(processed_at, event_type);"
     );
+    dbInstance.exec(
+      "CREATE INDEX IF NOT EXISTS idx_orders_status_created ON orders(status, created_at);"
+    );
+    dbInstance.exec(
+      "CREATE INDEX IF NOT EXISTS idx_order_items_order_id ON order_items(order_id);"
+    );
+    dbInstance.exec(
+      "CREATE INDEX IF NOT EXISTS idx_order_items_item_id ON order_items(item_id);"
+    );
+    dbInstance.exec(
+      "CREATE INDEX IF NOT EXISTS idx_admin_actions_created ON admin_actions(created_at);"
+    );
   }
   return dbInstance;
 };
