@@ -6,6 +6,7 @@ import { createItem, getOrCreateCategory, updateItem } from "../services/items.j
 
 const HELP_TEXT = `
 /help — показать список команд (Owner/Admin/Moderator/Support)
+/panel — админ-панель кнопками (Owner/Admin/Moderator/Support)
 /listitems — список товаров (Admin/Owner)
 /additem — добавить товар (Admin/Owner)
 /edititem <id> — изменить товар (Admin/Owner)
@@ -52,6 +53,7 @@ type PendingItem = {
 const pendingPayments = new Map<string, PendingPayment>();
 const pendingItems = new Map<string, PendingItem>();
 const pendingConfirmations = new Map<string, { orderId: number; expiresAt: number }>();
+const pendingAdminInputs = new Map<string, { action: string }>();
 
 const rolePermissions: Record<Role, Permission[]> = {
   owner: [
@@ -110,6 +112,27 @@ const requirePermission = (permissions: Permission[]) => async (ctx: any, next: 
   await next();
 };
 
+const ensurePermission = async (ctx: any, permissions: Permission[]) => {
+  if (!ctx.from) {
+    return false;
+  }
+  const db = getDb();
+  const admin = db
+    .prepare("SELECT role FROM admins WHERE telegram_id = ?")
+    .get(String(ctx.from.id)) as { role: Role } | undefined;
+  const role = admin?.role;
+  if (!role) {
+    await ctx.answerCbQuery("Нет прав.");
+    return false;
+  }
+  const allowed = permissions.some((permission) => rolePermissions[role]?.includes(permission));
+  if (!allowed) {
+    await ctx.answerCbQuery("Нет прав.");
+    return false;
+  }
+  return true;
+};
+
 export const createBot = () => {
   const bot = new Telegraf(config.BOT_TOKEN);
 
@@ -141,6 +164,290 @@ export const createBot = () => {
 
   bot.command("help", requireAdminChat, async (ctx) => {
     await ctx.reply(HELP_TEXT);
+  });
+
+  bot.command(
+    "panel",
+    requireAdminChat,
+    requirePermission([
+      "view_orders",
+      "send_message",
+      "manage_items",
+      "manage_admins",
+      "manage_payments",
+      "broadcast",
+    ]),
+    async (ctx) => {
+      const keyboard = Markup.inlineKeyboard([
+        [Markup.button.callback("🧾 Заказы", "panel:orders")],
+        [Markup.button.callback("📦 Товары", "panel:products"), Markup.button.callback("🗂 Категории", "panel:categories")],
+        [Markup.button.callback("💸 Цены/скидки", "panel:prices")],
+        [Markup.button.callback("👥 Пользователи", "panel:users")],
+        [Markup.button.callback("📣 Рассылки", "panel:broadcasts")],
+        [Markup.button.callback("⚙️ Настройки", "panel:settings")],
+        [Markup.button.callback("💬 Ответы поддержки", "panel:templates")],
+      ]);
+      await ctx.reply("Admin Center", keyboard);
+    }
+  );
+
+  bot.action("panel:products", async (ctx) => {
+    if (!(await ensurePermission(ctx, ["manage_items"]))) {
+      return;
+    }
+    await ctx.reply(
+      "Товары:",
+      Markup.inlineKeyboard([
+        [Markup.button.callback("Список", "panel:products:list")],
+        [Markup.button.callback("Добавить", "panel:products:add")],
+        [Markup.button.callback("Изменить", "panel:products:edit")],
+        [Markup.button.callback("Вкл/Выкл", "panel:products:toggle")],
+      ])
+    );
+    await ctx.answerCbQuery();
+  });
+
+  bot.action("panel:categories", async (ctx) => {
+    if (!(await ensurePermission(ctx, ["manage_items"]))) {
+      return;
+    }
+    await ctx.reply(
+      "Категории:",
+      Markup.inlineKeyboard([
+        [Markup.button.callback("Список", "panel:categories:list")],
+        [Markup.button.callback("Добавить", "panel:categories:add")],
+        [Markup.button.callback("Переименовать", "panel:categories:edit")],
+        [Markup.button.callback("Вкл/Выкл", "panel:categories:toggle")],
+      ])
+    );
+    await ctx.answerCbQuery();
+  });
+
+  bot.action("panel:orders", async (ctx) => {
+    if (!(await ensurePermission(ctx, ["view_orders"]))) {
+      return;
+    }
+    await ctx.reply(
+      "Заказы:",
+      Markup.inlineKeyboard([
+        [Markup.button.callback("Последние", "panel:orders:recent")],
+        [Markup.button.callback("По order_id", "panel:orders:by_id")],
+        [Markup.button.callback("По telegram_id", "panel:orders:by_user")],
+        [Markup.button.callback("По game_id", "panel:orders:by_game")],
+      ])
+    );
+    await ctx.answerCbQuery();
+  });
+
+  bot.action("panel:templates", async (ctx) => {
+    if (!(await ensurePermission(ctx, ["send_message"]))) {
+      return;
+    }
+    await ctx.reply(
+      "Шаблоны ответов:",
+      Markup.inlineKeyboard([
+        [Markup.button.callback("Оплата не найдена", "panel:template:not_found")],
+        [Markup.button.callback("Проверка заняла время", "panel:template:slow")],
+        [Markup.button.callback("Выполнено", "panel:template:done")],
+      ])
+    );
+    await ctx.answerCbQuery();
+  });
+
+  bot.action("panel:prices", async (ctx) => {
+    if (!(await ensurePermission(ctx, ["edit_price"]))) {
+      return;
+    }
+    await ctx.reply("Раздел цен/скидок в разработке. Используйте /edititem <id>.");
+    await ctx.answerCbQuery();
+  });
+
+  bot.action("panel:users", async (ctx) => {
+    if (!(await ensurePermission(ctx, ["manage_admins"]))) {
+      return;
+    }
+    await ctx.reply("Раздел пользователей в разработке. Используйте /suspicious или /suspicion.");
+    await ctx.answerCbQuery();
+  });
+
+  bot.action("panel:broadcasts", async (ctx) => {
+    if (!(await ensurePermission(ctx, ["broadcast"]))) {
+      return;
+    }
+    await ctx.reply("Рассылки доступны командой /broadcast <text>.");
+    await ctx.answerCbQuery();
+  });
+
+  bot.action("panel:settings", async (ctx) => {
+    if (!(await ensurePermission(ctx, ["manage_payments"]))) {
+      return;
+    }
+    await ctx.reply("Настройки доступны командами /payments и /setpayment.");
+    await ctx.answerCbQuery();
+  });
+
+  bot.action("panel:products:list", async (ctx) => {
+    if (!(await ensurePermission(ctx, ["manage_items"]))) {
+      return;
+    }
+    await ctx.answerCbQuery();
+    return bot.handleUpdate({ ...ctx.update, message: { ...ctx.update.callback_query?.message, text: "/listitems" } } as any);
+  });
+
+  bot.action("panel:products:add", async (ctx) => {
+    if (!(await ensurePermission(ctx, ["manage_items"]))) {
+      return;
+    }
+    if (!ctx.from) {
+      return;
+    }
+    pendingItems.set(String(ctx.from.id), { mode: "create", step: "name" });
+    await ctx.reply("Введите название товара.");
+    await ctx.answerCbQuery();
+  });
+
+  bot.action("panel:products:edit", async (ctx) => {
+    if (!(await ensurePermission(ctx, ["manage_items", "edit_price"]))) {
+      return;
+    }
+    if (!ctx.from) {
+      return;
+    }
+    pendingAdminInputs.set(String(ctx.from.id), { action: "edit_item" });
+    await ctx.reply("Отправьте ID товара для редактирования.");
+    await ctx.answerCbQuery();
+  });
+
+  bot.action("panel:products:toggle", async (ctx) => {
+    if (!(await ensurePermission(ctx, ["manage_items"]))) {
+      return;
+    }
+    if (!ctx.from) {
+      return;
+    }
+    pendingAdminInputs.set(String(ctx.from.id), { action: "toggle_item" });
+    await ctx.reply("Отправьте ID товара для включения/выключения.");
+    await ctx.answerCbQuery();
+  });
+
+  bot.action("panel:categories:list", async (ctx) => {
+    if (!(await ensurePermission(ctx, ["manage_items"]))) {
+      return;
+    }
+    const db = getDb();
+    const categories = db
+      .prepare("SELECT id, name, is_active as isActive FROM categories ORDER BY sort_order ASC")
+      .all() as { id: number; name: string; isActive: number }[];
+    if (!categories.length) {
+      await ctx.reply("Категорий нет.");
+    } else {
+      await ctx.reply(categories.map((c) => `#${c.id} • ${c.name} • ${c.isActive ? "on" : "off"}`).join("\n"));
+    }
+    await ctx.answerCbQuery();
+  });
+
+  bot.action("panel:categories:add", async (ctx) => {
+    if (!(await ensurePermission(ctx, ["manage_items"]))) {
+      return;
+    }
+    if (!ctx.from) {
+      return;
+    }
+    pendingAdminInputs.set(String(ctx.from.id), { action: "add_category" });
+    await ctx.reply("Отправьте название новой категории.");
+    await ctx.answerCbQuery();
+  });
+
+  bot.action("panel:categories:edit", async (ctx) => {
+    if (!(await ensurePermission(ctx, ["manage_items"]))) {
+      return;
+    }
+    if (!ctx.from) {
+      return;
+    }
+    pendingAdminInputs.set(String(ctx.from.id), { action: "edit_category" });
+    await ctx.reply("Отправьте: <id> <новое название>");
+    await ctx.answerCbQuery();
+  });
+
+  bot.action("panel:categories:toggle", async (ctx) => {
+    if (!(await ensurePermission(ctx, ["manage_items"]))) {
+      return;
+    }
+    if (!ctx.from) {
+      return;
+    }
+    pendingAdminInputs.set(String(ctx.from.id), { action: "toggle_category" });
+    await ctx.reply("Отправьте ID категории для включения/выключения.");
+    await ctx.answerCbQuery();
+  });
+
+  bot.action("panel:orders:recent", async (ctx) => {
+    if (!(await ensurePermission(ctx, ["view_orders"]))) {
+      return;
+    }
+    await ctx.answerCbQuery();
+    return bot.handleUpdate({ ...ctx.update, message: { ...ctx.update.callback_query?.message, text: "/orders" } } as any);
+  });
+
+  bot.action("panel:orders:by_id", async (ctx) => {
+    if (!(await ensurePermission(ctx, ["view_orders"]))) {
+      return;
+    }
+    if (!ctx.from) {
+      return;
+    }
+    pendingAdminInputs.set(String(ctx.from.id), { action: "order_by_id" });
+    await ctx.reply("Отправьте номер заказа.");
+    await ctx.answerCbQuery();
+  });
+
+  bot.action("panel:orders:by_user", async (ctx) => {
+    if (!(await ensurePermission(ctx, ["view_orders"]))) {
+      return;
+    }
+    if (!ctx.from) {
+      return;
+    }
+    pendingAdminInputs.set(String(ctx.from.id), { action: "order_by_user" });
+    await ctx.reply("Отправьте telegram_id пользователя.");
+    await ctx.answerCbQuery();
+  });
+
+  bot.action("panel:orders:by_game", async (ctx) => {
+    if (!(await ensurePermission(ctx, ["view_orders"]))) {
+      return;
+    }
+    if (!ctx.from) {
+      return;
+    }
+    pendingAdminInputs.set(String(ctx.from.id), { action: "order_by_game" });
+    await ctx.reply("Отправьте игровой ID.");
+    await ctx.answerCbQuery();
+  });
+
+  bot.action("panel:template:not_found", async (ctx) => {
+    if (!(await ensurePermission(ctx, ["send_message"]))) {
+      return;
+    }
+    await ctx.reply("Оплата не найдена. Проверьте реквизиты и попробуйте ещё раз.");
+    await ctx.answerCbQuery();
+  });
+
+  bot.action("panel:template:slow", async (ctx) => {
+    if (!(await ensurePermission(ctx, ["send_message"]))) {
+      return;
+    }
+    await ctx.reply("Проверка заняла больше времени, мы уже разбираемся. Спасибо за ожидание!");
+    await ctx.answerCbQuery();
+  });
+
+  bot.action("panel:template:done", async (ctx) => {
+    if (!(await ensurePermission(ctx, ["send_message"]))) {
+      return;
+    }
+    await ctx.reply("Заказ выполнен. Спасибо за покупку!");
+    await ctx.answerCbQuery();
   });
 
   bot.command("orders", requireAdminChat, requirePermission(["view_orders"]), async (ctx) => {
@@ -531,6 +838,143 @@ export const createBot = () => {
     if (incomingText?.startsWith("/")) {
       return;
     }
+    const pendingAdmin = pendingAdminInputs.get(String(ctx.from.id));
+    if (pendingAdmin) {
+      const text = incomingText ?? "";
+      const db = getDb();
+      if (pendingAdmin.action === "edit_item") {
+        const id = Number(text);
+        if (!id) {
+          await ctx.reply("Отправьте корректный ID товара.");
+          return;
+        }
+        pendingAdminInputs.delete(String(ctx.from.id));
+        pendingItems.set(String(ctx.from.id), { mode: "edit", id, step: "name" });
+        await ctx.reply(`Введите новое название товара (#${id}).`);
+        return;
+      }
+      if (pendingAdmin.action === "toggle_item") {
+        const id = Number(text);
+        if (!id) {
+          await ctx.reply("Отправьте корректный ID товара.");
+          return;
+        }
+        const item = db
+          .prepare("SELECT is_active as isActive FROM items WHERE id = ?")
+          .get(id) as { isActive: number } | undefined;
+        if (!item) {
+          await ctx.reply("Товар не найден.");
+          return;
+        }
+        const next = item.isActive ? 0 : 1;
+        db.prepare("UPDATE items SET is_active = ?, updated_at = ? WHERE id = ?").run(
+          next,
+          nowIso(),
+          id
+        );
+        pendingAdminInputs.delete(String(ctx.from.id));
+        await ctx.reply(`✅ Товар #${id} теперь ${next ? "включён" : "выключен"}.`);
+        return;
+      }
+      if (pendingAdmin.action === "add_category") {
+        if (!text) {
+          await ctx.reply("Отправьте название категории.");
+          return;
+        }
+        db.prepare("INSERT INTO categories (name, sort_order, is_active) VALUES (?, 0, 1)").run(text);
+        pendingAdminInputs.delete(String(ctx.from.id));
+        await ctx.reply("✅ Категория добавлена.");
+        return;
+      }
+      if (pendingAdmin.action === "edit_category") {
+        const [idRaw, ...rest] = text.split(" ");
+        const id = Number(idRaw);
+        const name = rest.join(" ").trim();
+        if (!id || !name) {
+          await ctx.reply("Отправьте: <id> <новое название>");
+          return;
+        }
+        db.prepare("UPDATE categories SET name = ? WHERE id = ?").run(name, id);
+        pendingAdminInputs.delete(String(ctx.from.id));
+        await ctx.reply(`✅ Категория #${id} обновлена.`);
+        return;
+      }
+      if (pendingAdmin.action === "toggle_category") {
+        const id = Number(text);
+        if (!id) {
+          await ctx.reply("Отправьте корректный ID категории.");
+          return;
+        }
+        const category = db
+          .prepare("SELECT is_active as isActive FROM categories WHERE id = ?")
+          .get(id) as { isActive: number } | undefined;
+        if (!category) {
+          await ctx.reply("Категория не найдена.");
+          return;
+        }
+        const next = category.isActive ? 0 : 1;
+        db.prepare("UPDATE categories SET is_active = ? WHERE id = ?").run(next, id);
+        pendingAdminInputs.delete(String(ctx.from.id));
+        await ctx.reply(`✅ Категория #${id} теперь ${next ? "включена" : "выключена"}.`);
+        return;
+      }
+      if (pendingAdmin.action === "order_by_id") {
+        const id = Number(text);
+        if (!id) {
+          await ctx.reply("Отправьте корректный ID заказа.");
+          return;
+        }
+        const order = db
+          .prepare(
+            "SELECT orders.id, orders.status, orders.total_amount as totalAmount, users.telegram_id as telegramId FROM orders JOIN users ON users.id = orders.user_id WHERE orders.id = ?"
+          )
+          .get(id) as { id: number; status: string; totalAmount: number; telegramId: string } | undefined;
+        pendingAdminInputs.delete(String(ctx.from.id));
+        if (!order) {
+          await ctx.reply("Заказ не найден.");
+          return;
+        }
+        await ctx.reply(`#${order.id} • ${order.status} • ${order.totalAmount} • user ${order.telegramId}`);
+        return;
+      }
+      if (pendingAdmin.action === "order_by_user") {
+        if (!text) {
+          await ctx.reply("Отправьте telegram_id пользователя.");
+          return;
+        }
+        const orders = db
+          .prepare(
+            "SELECT orders.id, orders.status, orders.total_amount as totalAmount FROM orders JOIN users ON users.id = orders.user_id WHERE users.telegram_id = ? ORDER BY orders.created_at DESC LIMIT 10"
+          )
+          .all(text) as { id: number; status: string; totalAmount: number }[];
+        pendingAdminInputs.delete(String(ctx.from.id));
+        if (!orders.length) {
+          await ctx.reply("Заказы не найдены.");
+          return;
+        }
+        await ctx.reply(orders.map((o) => `#${o.id} • ${o.status} • ${o.totalAmount}`).join("\n"));
+        return;
+      }
+      if (pendingAdmin.action === "order_by_game") {
+        if (!text) {
+          await ctx.reply("Отправьте игровой ID.");
+          return;
+        }
+        const orders = db
+          .prepare(
+            "SELECT id, status, total_amount as totalAmount FROM orders WHERE game_id = ? ORDER BY created_at DESC LIMIT 10"
+          )
+          .all(text) as { id: number; status: string; totalAmount: number }[];
+        pendingAdminInputs.delete(String(ctx.from.id));
+        if (!orders.length) {
+          await ctx.reply("Заказы не найдены.");
+          return;
+        }
+        await ctx.reply(orders.map((o) => `#${o.id} • ${o.status} • ${o.totalAmount}`).join("\n"));
+        return;
+      }
+    }
+
     const pending = pendingPayments.get(String(ctx.from.id));
     if (pending) {
       const text = incomingText;
