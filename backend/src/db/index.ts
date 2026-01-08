@@ -11,6 +11,16 @@ export const getDb = (): Db => {
     dbInstance = new Database(config.SQLITE_PATH);
     dbInstance.pragma("foreign_keys = ON");
     dbInstance.exec(schemaSql);
+    try {
+      dbInstance.exec("ALTER TABLE users ADD COLUMN updated_at TEXT");
+    } catch {
+      // ignore if exists
+    }
+    try {
+      dbInstance.exec("ALTER TABLE users ADD COLUMN is_blocked INTEGER DEFAULT 0");
+    } catch {
+      // ignore if exists
+    }
     dbInstance.exec(
       "CREATE INDEX IF NOT EXISTS idx_users_telegram_id ON users(telegram_id);"
     );

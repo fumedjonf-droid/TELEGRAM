@@ -5,7 +5,9 @@ CREATE TABLE IF NOT EXISTS users (
   username TEXT,
   first_name TEXT,
   created_at TEXT NOT NULL,
-  last_seen_at TEXT NOT NULL
+  last_seen_at TEXT NOT NULL,
+  updated_at TEXT,
+  is_blocked INTEGER DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS admins (

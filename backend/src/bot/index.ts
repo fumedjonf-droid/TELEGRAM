@@ -79,12 +79,12 @@ export const createBot = () => {
       .prepare("SELECT id FROM users WHERE telegram_id = ?")
       .get(telegramId) as { id: number } | undefined;
     if (existing) {
-      db.prepare("UPDATE users SET last_seen_at = ?, username = ?, first_name = ? WHERE id = ?")
-        .run(now, ctx.from.username ?? null, ctx.from.first_name ?? null, existing.id);
+      db.prepare("UPDATE users SET last_seen_at = ?, username = ?, first_name = ?, updated_at = ? WHERE id = ?")
+        .run(now, ctx.from.username ?? null, ctx.from.first_name ?? null, now, existing.id);
     } else {
       db.prepare(
-        "INSERT INTO users (telegram_id, username, first_name, created_at, last_seen_at) VALUES (?, ?, ?, ?, ?)"
-      ).run(telegramId, ctx.from.username ?? null, ctx.from.first_name ?? null, now, now);
+        "INSERT INTO users (telegram_id, username, first_name, created_at, last_seen_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)"
+      ).run(telegramId, ctx.from.username ?? null, ctx.from.first_name ?? null, now, now, now);
     }
 
     await ctx.reply(
@@ -319,18 +319,38 @@ export const createBot = () => {
       return;
     }
     const db = getDb();
-    const users = db.prepare("SELECT telegram_id as telegramId FROM users LIMIT 1000").all() as { telegramId: string }[];
+    const users = db
+      .prepare(
+        "SELECT telegram_id as telegramId FROM users WHERE (is_blocked IS NULL OR is_blocked = 0) LIMIT 5000"
+      )
+      .all() as { telegramId: string }[];
     let sent = 0;
     let failed = 0;
-    for (const user of users) {
+    let blocked = 0;
+    const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+    const batch = 20;
+    const pauseMs = 1200;
+    for (let i = 0; i < users.length; i += 1) {
+      const user = users[i];
       try {
         await bot.telegram.sendMessage(user.telegramId, text);
         sent += 1;
-      } catch {
+      } catch (error: any) {
         failed += 1;
+        const msg = String(error?.response?.description || error?.message || "").toLowerCase();
+        if (msg.includes("blocked by the user") || msg.includes("chat not found")) {
+          blocked += 1;
+          db.prepare("UPDATE users SET is_blocked = 1, updated_at = ? WHERE telegram_id = ?").run(
+            nowIso(),
+            user.telegramId
+          );
+        }
+      }
+      if ((i + 1) % batch === 0) {
+        await sleep(pauseMs);
       }
     }
-    await ctx.reply(`✅ Рассылка завершена. Успешно: ${sent}, ошибок: ${failed}.`);
+    await ctx.reply(`✅ Рассылка завершена. Успешно: ${sent}, ошибок: ${failed}, заблокировали: ${blocked}.`);
   });
 
   bot.command("payments", requireAdminChat, requireRole(["owner", "admin"]), async (ctx) => {
@@ -531,7 +551,13 @@ export const sendOrderToAdminGroup = async (bot: Telegraf, orderId: number) => {
 };
 
 export const registerOrderActions = (bot: Telegraf) => {
-  const handleStatusChange = async (ctx: any, status: string, action: string, note?: string) => {
+  const handleStatusChange = async (
+    ctx: any,
+    status: string,
+    action: string,
+    expectedStatus: string,
+    note?: string
+  ) => {
     if (!ctx.from) {
       return;
     }
@@ -557,7 +583,13 @@ export const registerOrderActions = (bot: Telegraf) => {
       return;
     }
     const now = nowIso();
-    db.prepare("UPDATE orders SET status = ?, updated_at = ? WHERE id = ?").run(status, now, orderId);
+    const result = db
+      .prepare("UPDATE orders SET status = ?, updated_at = ? WHERE id = ? AND status = ?")
+      .run(status, now, orderId, expectedStatus);
+    if (result.changes === 0) {
+      await ctx.reply("⚠️ Невозможно выполнить действие: статус заказа изменился или заказ не найден.");
+      return;
+    }
     db.prepare(
       "INSERT INTO admin_actions (order_id, admin_telegram_id, action, note, created_at) VALUES (?, ?, ?, ?, ?)"
     ).run(orderId, String(ctx.from.id), action, note ?? null, now);
@@ -574,10 +606,10 @@ export const registerOrderActions = (bot: Telegraf) => {
   };
 
   bot.action(/order:approve:(\d+)/, async (ctx) => {
-    await handleStatusChange(ctx, "approved", "approve");
+    await handleStatusChange(ctx, "approved", "approve", "paid_review");
   });
   bot.action(/order:reject:(\d+)/, async (ctx) => {
-    await handleStatusChange(ctx, "rejected", "reject");
+    await handleStatusChange(ctx, "rejected", "reject", "paid_review");
   });
   bot.action(/order:request_proof:(\d+)/, async (ctx) => {
     const orderId = Number(ctx.match?.[1]);
@@ -589,15 +621,17 @@ export const registerOrderActions = (bot: Telegraf) => {
       ctx,
       "awaiting_proof",
       "request_proof",
+      "pending",
       `📎 Пришлите, пожалуйста, чек/скрин оплаты по заказу №${orderId}. Без чека мы не сможем подтвердить оплату.`
     );
   });
   bot.action(/order:complete:(\d+)/, async (ctx) => {
-    await handleStatusChange(ctx, "completed", "complete");
+    await handleStatusChange(ctx, "completed", "complete", "approved");
   });
 };
 
 export const startOutboxWorker = (bot: Telegraf) => {
+  let running = false;
   const processOutbox = async () => {
     const db = getDb();
     const events = db
@@ -648,8 +682,20 @@ export const startOutboxWorker = (bot: Telegraf) => {
     }
   };
 
+  const tick = async () => {
+    if (running) {
+      return;
+    }
+    running = true;
+    try {
+      await processOutbox();
+      await processAutoActions();
+    } finally {
+      running = false;
+    }
+  };
+
   setInterval(() => {
-    processOutbox().catch(() => null);
-    processAutoActions().catch(() => null);
+    tick().catch(() => null);
   }, 30_000);
 };

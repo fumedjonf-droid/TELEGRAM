@@ -6,6 +6,8 @@ import helmet from "helmet";
 import cors from "cors";
 import rateLimit from "express-rate-limit";
 import https from "https";
+import { pipeline } from "stream";
+import { promisify } from "util";
 import { config } from "../config.js";
 import { getDb, nowIso } from "../db/index.js";
 import { isValidGameId, isValidQuantity } from "../utils/validators.js";
@@ -89,12 +91,12 @@ export const createServer = () => {
       .prepare("SELECT id FROM users WHERE telegram_id = ?")
       .get(user.id) as { id: number } | undefined;
     if (existing) {
-      db.prepare("UPDATE users SET last_seen_at = ?, username = ?, first_name = ? WHERE id = ?")
-        .run(now, user.username ?? null, user.first_name ?? null, existing.id);
+      db.prepare("UPDATE users SET last_seen_at = ?, username = ?, first_name = ?, updated_at = ? WHERE id = ?")
+        .run(now, user.username ?? null, user.first_name ?? null, now, existing.id);
     } else {
       db.prepare(
-        "INSERT INTO users (telegram_id, username, first_name, created_at, last_seen_at) VALUES (?, ?, ?, ?, ?)"
-      ).run(user.id, user.username ?? null, user.first_name ?? null, now, now);
+        "INSERT INTO users (telegram_id, username, first_name, created_at, last_seen_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)"
+      ).run(user.id, user.username ?? null, user.first_name ?? null, now, now, now);
     }
     return res.json({ ok: true, telegramId: user.id });
   });
@@ -132,26 +134,51 @@ export const createServer = () => {
     res.json(categories);
   });
 
-  app.get("/api/images/telegram/:fileId", (_req, res) => {
-    const fileId = _req.params.fileId;
+  const imageLimiter = rateLimit({ windowMs: 60_000, limit: 60 });
+
+  app.get("/api/images/telegram/:fileId", imageLimiter, async (req, res) => {
+    const fileId = req.params.fileId;
     if (!fileId) {
       return res.status(400).json({ error: "missing_file_id" });
     }
-    const url = `https://api.telegram.org/bot${config.BOT_TOKEN}/getFile?file_id=${fileId}`;
+    const db = getDb();
+    const exists = db
+      .prepare("SELECT 1 FROM items WHERE image_file_id = ? LIMIT 1")
+      .get(fileId) as { 1: number } | undefined;
+    if (!exists) {
+      return res.status(404).json({ error: "file_not_found" });
+    }
+    const metaUrl = `https://api.telegram.org/bot${config.BOT_TOKEN}/getFile?file_id=${encodeURIComponent(fileId)}`;
     https
-      .get(url, (resp) => {
+      .get(metaUrl, (metaResp) => {
         let data = "";
-        resp.on("data", (chunk) => {
+        metaResp.on("data", (chunk) => {
           data += chunk;
         });
-        resp.on("end", () => {
+        metaResp.on("end", async () => {
           try {
             const parsed = JSON.parse(data) as { ok: boolean; result?: { file_path?: string } };
             if (!parsed.ok || !parsed.result?.file_path) {
               return res.status(404).json({ error: "file_not_found" });
             }
-            const fileUrl = `https://api.telegram.org/file/bot${config.BOT_TOKEN}/${parsed.result.file_path}`;
-            return res.redirect(fileUrl);
+            const filePath = parsed.result.file_path;
+            const fileUrl = `https://api.telegram.org/file/bot${config.BOT_TOKEN}/${filePath}`;
+            https
+              .get(fileUrl, async (fileResp) => {
+                const ct = filePath.endsWith(".png")
+                  ? "image/png"
+                  : filePath.endsWith(".jpg") || filePath.endsWith(".jpeg")
+                    ? "image/jpeg"
+                    : "application/octet-stream";
+                res.setHeader("Content-Type", ct);
+                res.setHeader("Cache-Control", "public, max-age=86400");
+                try {
+                  await pipe(fileResp, res);
+                } catch {
+                  res.status(500).end();
+                }
+              })
+              .on("error", () => res.status(500).json({ error: "file_fetch_failed" }));
           } catch {
             return res.status(500).json({ error: "file_fetch_failed" });
           }
@@ -315,11 +342,14 @@ export const createServer = () => {
     }
 
     const now = nowIso();
-    db.prepare("UPDATE orders SET status = ?, updated_at = ? WHERE id = ?").run(
-      "paid_review",
-      now,
-      orderId
-    );
+    const result = db
+      .prepare(
+        "UPDATE orders SET status = ?, updated_at = ? WHERE id = ? AND status IN ('pending', 'awaiting_proof')"
+      )
+      .run("paid_review", now, orderId);
+    if (result.changes === 0) {
+      return res.status(409).json({ error: "invalid_status_transition" });
+    }
     db.prepare(
       "INSERT INTO order_outbox (order_id, event_type, created_at) VALUES (?, ?, ?)"
     ).run(orderId, "order_ready_for_review", now);
@@ -385,3 +415,4 @@ export const createServer = () => {
 
   return app;
 };
+const pipe = promisify(pipeline);
