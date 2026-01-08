@@ -188,6 +188,7 @@ const requireTelegramAuth = (req: AuthedRequest, res: express.Response, next: ex
 
 export const createServer = () => {
   const app = express();
+  app.set("trust proxy", 1);
   app.use(helmet());
   app.use(
     cors({
