@@ -72,6 +72,10 @@ export const createBot = () => {
   const bot = new Telegraf(config.BOT_TOKEN);
 
   bot.start(async (ctx) => {
+    if (ctx.chat?.type !== "private") {
+      await ctx.reply("Пожалуйста, откройте бот в личных сообщениях.");
+      return;
+    }
     const db = getDb();
     const now = nowIso();
     const telegramId = String(ctx.from.id);
@@ -89,9 +93,7 @@ export const createBot = () => {
 
     await ctx.reply(
       "Откройте магазин:",
-      Markup.inlineKeyboard([
-        Markup.button.webApp("Открыть магазин", config.APP_URL),
-      ])
+      Markup.inlineKeyboard([Markup.button.webApp("Открыть магазин", config.APP_URL)])
     );
   });
 
