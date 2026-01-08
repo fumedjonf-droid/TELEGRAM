@@ -20,6 +20,8 @@ jobs:
         run: npm ci --prefix backend
       - name: Build backend
         run: npm run build --prefix backend
+      - name: Test backend
+        run: npm run test --prefix backend
       - name: Install webapp deps
         run: npm ci --prefix webapp
       - name: Typecheck webapp
