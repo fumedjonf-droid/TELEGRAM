@@ -1,4 +1,4 @@
-import { createBrowserRouter, Outlet } from "react-router-dom";
+import { createBrowserRouter, Outlet, useLocation } from "react-router-dom";
 import { AnimatePresence } from "framer-motion";
 import { Welcome } from "../pages/Welcome";
 import { ShopHome } from "../pages/ShopHome";
@@ -10,11 +10,16 @@ import { OrderDetails } from "../pages/OrderDetails";
 import { Support } from "../pages/Support";
 import { NotFound } from "../pages/NotFound";
 
-const AnimatedLayout = () => (
-  <AnimatePresence mode="wait">
-    <Outlet />
-  </AnimatePresence>
-);
+const AnimatedLayout = () => {
+  const location = useLocation();
+  return (
+    <AnimatePresence mode="wait" initial={false}>
+      <div key={location.pathname}>
+        <Outlet />
+      </div>
+    </AnimatePresence>
+  );
+};
 
 export const router = createBrowserRouter([
   {

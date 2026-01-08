@@ -39,7 +39,11 @@ export const ShopHome = () => {
       <SearchInput value={search} onChange={setSearch} />
       <CategoryBar categories={categories} activeId={activeCategory} onChange={setActiveCategory} />
       {isLoading ? (
-        <div className="skeleton shimmer" />
+        <div className="grid">
+          {Array.from({ length: 4 }).map((_, index) => (
+            <div key={index} className="skeleton shimmer" />
+          ))}
+        </div>
       ) : filteredItems.length === 0 ? (
         <div className="empty-state">
           <p>Товары скоро появятся. Загляните чуть позже ✨</p>

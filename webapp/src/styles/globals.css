@@ -316,6 +316,32 @@ body {
   color: #475569;
 }
 
+.orders-list {
+  display: grid;
+  gap: 12px;
+}
+
+.order-card {
+  background: white;
+  padding: 12px;
+  border-radius: 16px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+  text-decoration: none;
+  color: inherit;
+  display: grid;
+  gap: 4px;
+}
+
+.order-status {
+  font-size: 12px;
+  color: #2563eb;
+}
+
+.order-date {
+  font-size: 12px;
+  color: #64748b;
+}
+
 .trust-note {
   display: flex;
   gap: 8px;

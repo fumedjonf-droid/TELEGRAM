@@ -2,6 +2,7 @@ import { Telegraf, Markup } from "telegraf";
 import { config } from "../config.js";
 import { getDb, nowIso } from "../db/index.js";
 import { deletePaymentSetting, getNumericSetting, getPaymentSettings, setPaymentSetting } from "../services/settings.js";
+import { createItem, getOrCreateCategory, updateItem } from "../services/items.js";
 
 const HELP_TEXT = `
 /help — показать список команд (Owner/Admin/Moderator)
@@ -24,8 +25,19 @@ const HELP_TEXT = `
 
 type Role = "owner" | "admin" | "moderator";
 type PendingPayment = { type: "dc" | "card" | "qr" };
+type PendingItem = {
+  mode: "create" | "edit";
+  id?: number;
+  step: "name" | "price" | "description" | "category" | "photo";
+  name?: string;
+  price?: number;
+  description?: string;
+  category?: string;
+  imageFileId?: string | null;
+};
 
 const pendingPayments = new Map<string, PendingPayment>();
+const pendingItems = new Map<string, PendingItem>();
 
 const requireAdminChat = async (ctx: any, next: () => Promise<void>) => {
   if (!ctx.chat) {
@@ -106,6 +118,86 @@ export const createBot = () => {
     await ctx.reply(message);
   });
 
+  bot.command("listitems", requireAdminChat, requireRole(["owner", "admin"]), async (ctx) => {
+    const db = getDb();
+    const items = db
+      .prepare(
+        "SELECT id, name, price, is_active as isActive FROM items ORDER BY created_at DESC LIMIT 50"
+      )
+      .all() as { id: number; name: string; price: number; isActive: number }[];
+    if (!items.length) {
+      await ctx.reply("Список товаров пуст.");
+      return;
+    }
+    const message = items
+      .map((item) => `#${item.id} • ${item.name} • ${item.price} • ${item.isActive ? "on" : "off"}`)
+      .join("\n");
+    await ctx.reply(message);
+  });
+
+  bot.command("additem", requireAdminChat, requireRole(["owner", "admin"]), async (ctx) => {
+    pendingItems.set(String(ctx.from.id), { mode: "create", step: "name" });
+    await ctx.reply("Введите название товара.");
+  });
+
+  bot.command("edititem", requireAdminChat, requireRole(["owner", "admin"]), async (ctx) => {
+    const [_, idRaw] = ctx.message.text.split(" ");
+    const id = Number(idRaw);
+    if (!id) {
+      await ctx.reply("Использование: /edititem <id>");
+      return;
+    }
+    const db = getDb();
+    const item = db
+      .prepare("SELECT id, name, price, description, category_id as categoryId, image_file_id as imageFileId FROM items WHERE id = ?")
+      .get(id) as { id: number; name: string; price: number; description: string; categoryId?: number | null; imageFileId?: string | null } | undefined;
+    if (!item) {
+      await ctx.reply("Товар не найден.");
+      return;
+    }
+    pendingItems.set(String(ctx.from.id), {
+      mode: "edit",
+      id,
+      step: "name",
+      name: item.name,
+      price: item.price,
+      description: item.description,
+    });
+    await ctx.reply(`Введите новое название товара (#${id}).`);
+  });
+
+  bot.command("deleteitem", requireAdminChat, requireRole(["owner", "admin"]), async (ctx) => {
+    const [_, idRaw] = ctx.message.text.split(" ");
+    const id = Number(idRaw);
+    if (!id) {
+      await ctx.reply("Использование: /deleteitem <id>");
+      return;
+    }
+    const db = getDb();
+    db.prepare("DELETE FROM items WHERE id = ?").run(id);
+    await ctx.reply(`✅ Товар #${id} удалён.`);
+  });
+
+  bot.command("toggleitem", requireAdminChat, requireRole(["owner", "admin"]), async (ctx) => {
+    const [_, idRaw] = ctx.message.text.split(" ");
+    const id = Number(idRaw);
+    if (!id) {
+      await ctx.reply("Использование: /toggleitem <id>");
+      return;
+    }
+    const db = getDb();
+    const item = db
+      .prepare("SELECT is_active as isActive FROM items WHERE id = ?")
+      .get(id) as { isActive: number } | undefined;
+    if (!item) {
+      await ctx.reply("Товар не найден.");
+      return;
+    }
+    const next = item.isActive ? 0 : 1;
+    db.prepare("UPDATE items SET is_active = ?, updated_at = ? WHERE id = ?").run(next, nowIso(), id);
+    await ctx.reply(`✅ Товар #${id} теперь ${next ? "включён" : "выключен"}.`);
+  });
+
   bot.command("grant", requireAdminChat, requireRole(["owner"]), async (ctx) => {
     const [_, telegramId, role] = ctx.message.text.split(" ");
     if (!telegramId || !role || !["admin", "moderator"].includes(role)) {
@@ -143,6 +235,42 @@ export const createBot = () => {
     await ctx.reply(list);
   });
 
+  bot.command("send", requireAdminChat, requireRole(["owner", "admin"]), async (ctx) => {
+    const [_, telegramId, ...rest] = ctx.message.text.split(" ");
+    const text = rest.join(" ").trim();
+    if (!telegramId || !text) {
+      await ctx.reply("Использование: /send <telegram_id> <text>");
+      return;
+    }
+    try {
+      await bot.telegram.sendMessage(telegramId, text);
+      await ctx.reply("✅ Сообщение отправлено.");
+    } catch {
+      await ctx.reply("❌ Не удалось отправить сообщение.");
+    }
+  });
+
+  bot.command("broadcast", requireAdminChat, requireRole(["owner"]), async (ctx) => {
+    const text = ctx.message.text.replace("/broadcast", "").trim();
+    if (!text) {
+      await ctx.reply("Использование: /broadcast <text>");
+      return;
+    }
+    const db = getDb();
+    const users = db.prepare("SELECT telegram_id as telegramId FROM users LIMIT 1000").all() as { telegramId: string }[];
+    let sent = 0;
+    let failed = 0;
+    for (const user of users) {
+      try {
+        await bot.telegram.sendMessage(user.telegramId, text);
+        sent += 1;
+      } catch {
+        failed += 1;
+      }
+    }
+    await ctx.reply(`✅ Рассылка завершена. Успешно: ${sent}, ошибок: ${failed}.`);
+  });
+
   bot.command("payments", requireAdminChat, requireRole(["owner", "admin"]), async (ctx) => {
     const payments = getPaymentSettings();
     const message = [
@@ -175,29 +303,104 @@ export const createBot = () => {
 
   bot.on(["text", "photo"], requireAdminChat, requireRole(["owner", "admin"]), async (ctx) => {
     const pending = pendingPayments.get(String(ctx.from.id));
-    if (!pending) {
-      return;
-    }
-    if (pending.type === "qr") {
-      const photos = ctx.message.photo;
-      if (!photos?.length) {
-        await ctx.reply("Отправьте фото QR.");
+    if (pending) {
+      if (pending.type === "qr") {
+        const photos = ctx.message.photo;
+        if (!photos?.length) {
+          await ctx.reply("Отправьте фото QR.");
+          return;
+        }
+        const fileId = photos[photos.length - 1].file_id;
+        setPaymentSetting("qr", fileId, String(ctx.from.id));
+        pendingPayments.delete(String(ctx.from.id));
+        await ctx.reply("✅ QR реквизиты обновлены.");
         return;
       }
-      const fileId = photos[photos.length - 1].file_id;
-      setPaymentSetting("qr", fileId, String(ctx.from.id));
+      const text = ctx.message.text?.trim();
+      if (!text) {
+        await ctx.reply("Отправьте текст реквизитов.");
+        return;
+      }
+      setPaymentSetting(pending.type, text, String(ctx.from.id));
       pendingPayments.delete(String(ctx.from.id));
-      await ctx.reply("✅ QR реквизиты обновлены.");
+      await ctx.reply(`✅ Реквизиты ${pending.type} обновлены.`);
       return;
     }
+
+    const pendingItem = pendingItems.get(String(ctx.from.id));
+    if (!pendingItem) {
+      return;
+    }
+
+    if (pendingItem.step === "photo") {
+      const photos = ctx.message.photo;
+      if (!photos?.length) {
+        await ctx.reply("Отправьте фото товара.");
+        return;
+      }
+      pendingItem.imageFileId = photos[photos.length - 1].file_id;
+      const categoryId = pendingItem.category ? getOrCreateCategory(pendingItem.category) : null;
+      if (pendingItem.mode === "create") {
+        createItem({
+          name: pendingItem.name!,
+          price: pendingItem.price!,
+          description: pendingItem.description ?? "",
+          categoryId,
+          imageFileId: pendingItem.imageFileId ?? null,
+        });
+        pendingItems.delete(String(ctx.from.id));
+        await ctx.reply("✅ Товар добавлен.");
+      } else if (pendingItem.id) {
+        updateItem(pendingItem.id, {
+          name: pendingItem.name!,
+          price: pendingItem.price!,
+          description: pendingItem.description ?? "",
+          categoryId,
+          imageFileId: pendingItem.imageFileId ?? null,
+        });
+        pendingItems.delete(String(ctx.from.id));
+        await ctx.reply("✅ Товар обновлён.");
+      }
+      return;
+    }
+
     const text = ctx.message.text?.trim();
     if (!text) {
-      await ctx.reply("Отправьте текст реквизитов.");
+      await ctx.reply("Отправьте текст.");
       return;
     }
-    setPaymentSetting(pending.type, text, String(ctx.from.id));
-    pendingPayments.delete(String(ctx.from.id));
-    await ctx.reply(`✅ Реквизиты ${pending.type} обновлены.`);
+
+    if (pendingItem.step === "name") {
+      pendingItem.name = text;
+      pendingItem.step = "price";
+      await ctx.reply("Введите цену (число).");
+      return;
+    }
+
+    if (pendingItem.step === "price") {
+      const price = Number(text);
+      if (!Number.isFinite(price) || price <= 0) {
+        await ctx.reply("Цена должна быть числом.");
+        return;
+      }
+      pendingItem.price = price;
+      pendingItem.step = "description";
+      await ctx.reply("Введите описание товара.");
+      return;
+    }
+
+    if (pendingItem.step === "description") {
+      pendingItem.description = text;
+      pendingItem.step = "category";
+      await ctx.reply("Введите категорию товара.");
+      return;
+    }
+
+    if (pendingItem.step === "category") {
+      pendingItem.category = text;
+      pendingItem.step = "photo";
+      await ctx.reply("Отправьте фото товара.");
+    }
   });
 
   return bot;

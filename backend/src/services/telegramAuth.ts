@@ -9,10 +9,22 @@ const parseInitData = (initData: string): Map<string, string> => {
   return data;
 };
 
-export const validateInitData = (initData: string, botToken: string): boolean => {
+export const validateInitData = (initData: string, botToken: string, maxAgeSeconds = 300): boolean => {
   const data = parseInitData(initData);
   const hash = data.get("hash");
   if (!hash) {
+    return false;
+  }
+  const authDate = data.get("auth_date");
+  if (!authDate) {
+    return false;
+  }
+  const authTimestamp = Number(authDate);
+  if (!Number.isFinite(authTimestamp)) {
+    return false;
+  }
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  if (nowSeconds - authTimestamp > maxAgeSeconds) {
     return false;
   }
   data.delete("hash");
@@ -20,7 +32,10 @@ export const validateInitData = (initData: string, botToken: string): boolean =>
   const dataCheckString = sorted.map(([key, value]) => `${key}=${value}`).join("\n");
   const secret = crypto.createHmac("sha256", "WebAppData").update(botToken).digest();
   const calculatedHash = crypto.createHmac("sha256", secret).update(dataCheckString).digest("hex");
-  return calculatedHash === hash;
+  if (calculatedHash.length !== hash.length) {
+    return false;
+  }
+  return crypto.timingSafeEqual(Buffer.from(calculatedHash), Buffer.from(hash));
 };
 
 export const parseUserFromInitData = (initData: string): {

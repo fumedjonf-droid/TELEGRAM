@@ -5,6 +5,7 @@ import fs from "fs";
 import helmet from "helmet";
 import cors from "cors";
 import rateLimit from "express-rate-limit";
+import https from "https";
 import { config } from "../config.js";
 import { getDb, nowIso } from "../db/index.js";
 import { isValidGameId, isValidQuantity } from "../utils/validators.js";
@@ -15,10 +16,15 @@ if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
+const sanitizeFilename = (name: string) => {
+  const base = path.basename(name).replace(/[^a-zA-Z0-9._-]/g, "_");
+  return base.slice(0, 64) || "file";
+};
+
 const upload = multer({
   storage: multer.diskStorage({
     destination: (_req, _file, cb) => cb(null, uploadsDir),
-    filename: (_req, file, cb) => cb(null, `${Date.now()}-${file.originalname}`),
+    filename: (_req, file, cb) => cb(null, `${Date.now()}-${sanitizeFilename(file.originalname)}`),
   }),
   limits: { fileSize: 5 * 1024 * 1024, files: 1 },
   fileFilter: (_req, file, cb) => {
@@ -116,14 +122,51 @@ export const createServer = () => {
   app.get("/api/payments", (_req, res) => {
     const db = getDb();
     const rows = db
-      .prepare(\"SELECT key, value FROM settings WHERE key IN ('payment_dc_requisites', 'payment_card_requisites', 'payment_qr_image')\")
+      .prepare(
+        "SELECT key, value FROM settings WHERE key IN ('payment_dc_requisites', 'payment_card_requisites', 'payment_qr_image')"
+      )
       .all() as { key: string; value: string }[];
     const map = new Map(rows.map((row) => [row.key, row.value]));
     res.json({
-      dc: map.get(\"payment_dc_requisites\") ?? null,
-      card: map.get(\"payment_card_requisites\") ?? null,
-      qr: map.get(\"payment_qr_image\") ?? null,
+      dc: map.get("payment_dc_requisites") ?? null,
+      card: map.get("payment_card_requisites") ?? null,
+      qr: map.get("payment_qr_image") ?? null,
     });
+  });
+
+  app.get("/api/payments/qr", (_req, res) => {
+    const db = getDb();
+    const setting = db
+      .prepare("SELECT value FROM settings WHERE key = 'payment_qr_image'")
+      .get() as { value: string } | undefined;
+    if (!setting) {
+      return res.status(404).json({ error: "qr_not_set" });
+    }
+    if (setting.value.startsWith("http")) {
+      return res.json({ url: setting.value });
+    }
+    const fileId = setting.value;
+    const url = `https://api.telegram.org/bot${config.BOT_TOKEN}/getFile?file_id=${fileId}`;
+    https
+      .get(url, (resp) => {
+        let data = "";
+        resp.on("data", (chunk) => {
+          data += chunk;
+        });
+        resp.on("end", () => {
+          try {
+            const parsed = JSON.parse(data) as { ok: boolean; result?: { file_path?: string } };
+            if (!parsed.ok || !parsed.result?.file_path) {
+              return res.status(500).json({ error: "qr_fetch_failed" });
+            }
+            const fileUrl = `https://api.telegram.org/file/bot${config.BOT_TOKEN}/${parsed.result.file_path}`;
+            return res.json({ url: fileUrl });
+          } catch {
+            return res.status(500).json({ error: "qr_fetch_failed" });
+          }
+        });
+      })
+      .on("error", () => res.status(500).json({ error: "qr_fetch_failed" }));
   });
 
   app.post("/api/orders", requireTelegramAuth, (req: AuthedRequest, res) => {
@@ -286,6 +329,43 @@ export const createServer = () => {
       )
       .all(req.user.telegramId);
     res.json(orders);
+  });
+
+  app.get("/api/orders/:id", requireTelegramAuth, (req: AuthedRequest, res) => {
+    const orderId = Number(req.params.id);
+    if (!req.user || !orderId) {
+      return res.status(400).json({ error: "invalid_order" });
+    }
+    const db = getDb();
+    const order = db
+      .prepare(
+        "SELECT orders.id, orders.status, orders.total_amount as totalAmount, orders.game_id as gameId, orders.payment_method as paymentMethod, orders.proof_file_id as proofFileId, orders.proof_path as proofPath, orders.created_at as createdAt, users.telegram_id as telegramId FROM orders JOIN users ON users.id = orders.user_id WHERE orders.id = ?"
+      )
+      .get(orderId) as
+      | {
+          id: number;
+          status: string;
+          totalAmount: number;
+          gameId: string;
+          paymentMethod: string;
+          proofFileId?: string | null;
+          proofPath?: string | null;
+          createdAt: string;
+          telegramId: string;
+        }
+      | undefined;
+    if (!order) {
+      return res.status(404).json({ error: "order_not_found" });
+    }
+    if (order.telegramId !== req.user.telegramId) {
+      return res.status(403).json({ error: "forbidden" });
+    }
+    const items = db
+      .prepare(
+        "SELECT items.name, order_items.qty, order_items.price_snapshot as priceSnapshot FROM order_items JOIN items ON items.id = order_items.item_id WHERE order_items.order_id = ?"
+      )
+      .all(orderId);
+    return res.json({ ...order, items });
   });
 
   app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {

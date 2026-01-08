@@ -5,26 +5,67 @@ import { formatMoney } from "../../utils/formatMoney";
 import { motion } from "framer-motion";
 import { useQuery } from "@tanstack/react-query";
 import { fetchPayments } from "../../api/payments.api";
+import { createOrder, markPaid, uploadProof } from "../../api/orders.api";
 
 const paymentMethods = ["DC", "Карта"] as const;
 
 export const Checkout = () => {
   const items = useCartStore((state) => state.items);
   const total = useCartStore((state) => state.totalPrice());
+  const clear = useCartStore((state) => state.clear);
   const [gameId, setGameId] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<string | null>(null);
   const [proof, setProof] = useState<File | null>(null);
   const [attempted, setAttempted] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [orderId, setOrderId] = useState<number | null>(null);
+  const [orderStatus, setOrderStatus] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const { data: payments } = useQuery({ queryKey: ["payments"], queryFn: fetchPayments });
   const canConfirm = useMemo(() => {
     return Boolean(gameId && paymentMethod && proof);
   }, [gameId, paymentMethod, proof]);
 
-  const handleConfirm = () => {
+  const handleConfirm = async () => {
     if (!canConfirm) {
       setAttempted(true);
+      return;
+    }
+    if (!proof) {
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const order = await createOrder({
+        gameId,
+        paymentMethod,
+        items: items.map((item) => ({ itemId: item.itemId, qty: item.qty })),
+      });
+      await uploadProof(order.orderId, proof);
+      const paid = await markPaid(order.orderId);
+      setOrderId(order.orderId);
+      setOrderStatus(paid.status);
+      clear();
+    } catch {
+      setError("Что-то пошло не так. Попробуйте ещё раз через пару секунд.");
+    } finally {
+      setLoading(false);
     }
   };
+
+  if (orderId) {
+    return (
+      <PageContainer>
+        <h2>Заказ оформлен</h2>
+        <div className="empty-state">
+          <p>Номер заказа: #{orderId}</p>
+          <p>Статус: {orderStatus}</p>
+          <p>Мы проверим оплату и пришлём уведомление.</p>
+        </div>
+      </PageContainer>
+    );
+  }
 
   return (
     <PageContainer>
@@ -90,13 +131,14 @@ export const Checkout = () => {
           <input type="file" onChange={(event) => setProof(event.target.files?.[0] ?? null)} />
         </div>
       </div>
-      <button className="button primary" disabled={!canConfirm} onClick={handleConfirm}>
-        Я оплатил(а)
+      <button className="button primary" disabled={!canConfirm || loading} onClick={handleConfirm}>
+        {loading ? "Отправляем..." : "Я оплатил(а)"}
       </button>
       <div className="trust-note">
         <span>🔒</span>
         <span>Оплата проверяется вручную администратором</span>
       </div>
+      {error && <p className="hint">{error}</p>}
       {!canConfirm && attempted && (
         <motion.p className="hint" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
           Прикрепите чек и выберите метод оплаты, чтобы подтвердить заказ.
