@@ -143,6 +143,21 @@ body {
   gap: 8px;
 }
 
+.payment-grid.disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.id-row {
+  display: flex;
+  gap: 8px;
+}
+
+.id-confirmed {
+  display: grid;
+  gap: 6px;
+}
+
 .payment-tile {
   padding: 8px 12px;
   border-radius: 12px;

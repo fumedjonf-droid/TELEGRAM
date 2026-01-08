@@ -130,7 +130,7 @@ export const createBot = () => {
     const db = getDb();
     const order = db
       .prepare(
-        `SELECT orders.id, orders.status, orders.total_amount as totalAmount, orders.game_id as gameId,
+        `SELECT orders.id, orders.status, orders.total_amount as totalAmount, orders.game_id as gameId, orders.game_nick as gameNick,
         orders.payment_method as paymentMethod, orders.proof_file_id as proofFileId, orders.proof_type as proofType,
         orders.created_at as createdAt, users.telegram_id as telegramId, users.username as username
         FROM orders JOIN users ON users.id = orders.user_id WHERE orders.id = ?`
@@ -141,6 +141,7 @@ export const createBot = () => {
           status: string;
           totalAmount: number;
           gameId: string;
+          gameNick?: string | null;
           paymentMethod: string;
           proofFileId?: string | null;
           proofType?: string | null;
@@ -165,13 +166,14 @@ export const createBot = () => {
       `🧾 Заказ #${order.id}`,
       `👤 ${userLabel}`,
       `🎮 ID: ${order.gameId}`,
+      order.gameNick ? `🧑 Ник: ${order.gameNick}` : null,
       `💰 Сумма: ${order.totalAmount}`,
       `💳 Оплата: ${order.paymentMethod}`,
       `📎 Чек: ${order.proofFileId ? "есть" : "нет"}`,
       `Статус: ${order.status}`,
       `Создан: ${order.createdAt}`,
       `Товары:\n${itemLines}`,
-    ].join("\n");
+    ].filter(Boolean).join("\n");
     await ctx.reply(message);
     if (order.proofFileId) {
       if (order.proofType?.startsWith("image/")) {

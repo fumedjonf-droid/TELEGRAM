@@ -110,7 +110,7 @@ export const createServer = () => {
     const db = getDb();
     const items = db
       .prepare(
-        "SELECT id, name, description, price, category_id as categoryId, image_url as imageUrl, image_file_id as imageFileId, is_active as isActive FROM items WHERE is_active = 1"
+        "SELECT items.id, items.name, items.description, items.price, items.category_id as categoryId, categories.name as categoryName, items.image_url as imageUrl, items.image_file_id as imageFileId, items.is_active as isActive FROM items LEFT JOIN categories ON categories.id = items.category_id WHERE items.is_active = 1 ORDER BY items.created_at DESC"
       )
       .all() as {
       id: number;
@@ -118,6 +118,7 @@ export const createServer = () => {
       description?: string;
       price: number;
       categoryId?: number;
+      categoryName?: string | null;
       imageUrl?: string | null;
       imageFileId?: string | null;
       isActive: number;
@@ -207,8 +208,9 @@ export const createServer = () => {
   });
 
   app.post("/api/orders", requireTelegramAuth, (req: AuthedRequest, res) => {
-    const { gameId, paymentMethod, items } = req.body as {
+    const { gameId, gameNick, paymentMethod, items } = req.body as {
       gameId?: string;
+      gameNick?: string;
       paymentMethod?: string;
       items?: { itemId: number; qty: number }[];
     };
@@ -216,7 +218,7 @@ export const createServer = () => {
     if (!req.user || !gameId || !paymentMethod || !items?.length) {
       return res.status(400).json({ error: "missing_fields" });
     }
-    if (!["DC", "Карта", "dc", "card"].includes(paymentMethod)) {
+    if (!["DC", "Карта", "СБП 1", "СБП 2", "Картой", "dc", "card"].includes(paymentMethod)) {
       return res.status(400).json({ error: "invalid_payment_method" });
     }
     if (!isValidGameId(gameId)) {
@@ -262,9 +264,9 @@ export const createServer = () => {
     const now = nowIso();
     const result = db
       .prepare(
-        "INSERT INTO orders (user_id, game_id, status, total_amount, payment_method, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+        "INSERT INTO orders (user_id, game_id, game_nick, status, total_amount, payment_method, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
       )
-      .run(user.id, gameId, "pending", total, paymentMethod, now, now);
+      .run(user.id, gameId, gameNick ?? null, "pending", total, paymentMethod, now, now);
 
     const orderId = Number(result.lastInsertRowid);
     const insertOrderItem = db.prepare(
@@ -361,6 +363,15 @@ export const createServer = () => {
     return res.json({ ok: true, status: "paid_review" });
   });
 
+  app.post("/api/game/check", (req, res) => {
+    const { gameId } = req.body as { gameId?: string };
+    if (!gameId || !isValidGameId(gameId)) {
+      return res.status(400).json({ error: "invalid_game_id" });
+    }
+    const nickname = `Player${gameId.slice(-4)}`;
+    return res.json({ ok: true, nickname });
+  });
+
   app.get("/api/orders/my", requireTelegramAuth, (req: AuthedRequest, res) => {
     if (!req.user) {
       return res.status(401).json({ error: "unauthorized" });
@@ -382,7 +393,7 @@ export const createServer = () => {
     const db = getDb();
     const order = db
       .prepare(
-        "SELECT orders.id, orders.status, orders.total_amount as totalAmount, orders.game_id as gameId, orders.payment_method as paymentMethod, orders.proof_file_id as proofFileId, orders.proof_path as proofPath, orders.created_at as createdAt, users.telegram_id as telegramId FROM orders JOIN users ON users.id = orders.user_id WHERE orders.id = ?"
+        "SELECT orders.id, orders.status, orders.total_amount as totalAmount, orders.game_id as gameId, orders.game_nick as gameNick, orders.payment_method as paymentMethod, orders.proof_file_id as proofFileId, orders.proof_path as proofPath, orders.created_at as createdAt, users.telegram_id as telegramId FROM orders JOIN users ON users.id = orders.user_id WHERE orders.id = ?"
       )
       .get(orderId) as
       | {
@@ -390,6 +401,7 @@ export const createServer = () => {
           status: string;
           totalAmount: number;
           gameId: string;
+          gameNick?: string | null;
           paymentMethod: string;
           proofFileId?: string | null;
           proofPath?: string | null;

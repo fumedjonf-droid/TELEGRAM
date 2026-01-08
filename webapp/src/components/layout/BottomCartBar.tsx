@@ -6,16 +6,19 @@ import { motion } from "framer-motion";
 export const BottomCartBar = () => {
   const totalPrice = useCartStore((state) => state.totalPrice());
   const totalQty = useCartStore((state) => state.totalQty());
+  const items = useCartStore((state) => state.items);
 
   if (totalQty === 0) {
     return null;
   }
+  const first = items[0];
+  const title = first ? `Купить ${first.name} за ${formatMoney(totalPrice)}` : `Купить за ${formatMoney(totalPrice)}`;
 
   return (
     <div className="bottom-cart-bar">
       <div>
         <div className="bottom-cart-title">
-          В корзине:{" "}
+          {title}{" "}
           <motion.span
             key={totalQty}
             className="cart-badge"

@@ -17,6 +17,7 @@ export type OrderSummary = {
 
 export type OrderDetails = OrderSummary & {
   gameId: string;
+  gameNick?: string | null;
   paymentMethod: string;
   proofFileId?: string | null;
   proofPath?: string | null;
@@ -25,6 +26,7 @@ export type OrderDetails = OrderSummary & {
 
 export const createOrder = (payload: {
   gameId: string;
+  gameNick?: string | null;
   paymentMethod: string;
   items: OrderItemPayload[];
 }) => apiClient<CreateOrderResponse>("/api/orders", {

@@ -8,6 +8,7 @@ export type Item = {
   imageUrl?: string;
   imageFileId?: string;
   categoryId?: number;
+  categoryName?: string | null;
 };
 
 export type Category = {

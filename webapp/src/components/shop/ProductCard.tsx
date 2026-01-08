@@ -5,6 +5,8 @@ import { useCartStore } from "../../store/cart.store";
 
 export const ProductCard = ({ item }: { item: Item }) => {
   const addItem = useCartStore((state) => state.addItem);
+  const items = useCartStore((state) => state.items);
+  const selected = items.some((entry) => entry.itemId === item.id);
 
   return (
     <motion.div className="card" whileTap={{ scale: 0.97 }}>
@@ -20,12 +22,12 @@ export const ProductCard = ({ item }: { item: Item }) => {
         <div className="card-description">{item.description ?? "Популярный товар"}</div>
         <div className="card-price">{formatMoney(item.price)}</div>
         <button
-          className="button"
+          className={`button ${selected ? "primary" : ""}`}
           onClick={() =>
             addItem({ itemId: item.id, name: item.name, price: item.price, imageUrl: item.imageUrl })
           }
         >
-          Добавить
+          {selected ? "Выбрано" : "Выбрать"}
         </button>
       </div>
     </motion.div>

@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS orders (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER NOT NULL,
   game_id TEXT NOT NULL,
+  game_nick TEXT,
   status TEXT NOT NULL CHECK(status IN ('pending', 'awaiting_proof', 'paid_review', 'approved', 'rejected', 'completed', 'canceled')),
   total_amount INTEGER NOT NULL,
   payment_method TEXT NOT NULL,

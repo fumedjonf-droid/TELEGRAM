@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { fetchCategories, fetchItems } from "../../api/items.api";
+import { fetchItems } from "../../api/items.api";
 import { AppHeader } from "../../components/layout/AppHeader";
 import { BottomCartBar } from "../../components/layout/BottomCartBar";
 import { PageContainer } from "../../components/layout/PageContainer";
@@ -12,20 +12,27 @@ import { useNavigate } from "react-router-dom";
 export const ShopHome = () => {
   const navigate = useNavigate();
   const { data: items = [], isLoading } = useQuery({ queryKey: ["items"], queryFn: fetchItems });
-  const { data: categories = [] } = useQuery({
-    queryKey: ["categories"],
-    queryFn: fetchCategories
-  });
-  const [activeCategory, setActiveCategory] = useState<number | undefined>(undefined);
+  const categories = [
+    { id: 1, name: "Все игры" },
+    { id: 2, name: "FreeFire" },
+    { id: 3, name: "Steam" },
+    { id: 4, name: "PUBG Mobile" },
+    { id: 5, name: "TG Stars" },
+    { id: 6, name: "Mobile Legends" },
+    { id: 7, name: "Genshin" }
+  ];
+  const [activeCategory, setActiveCategory] = useState<number | undefined>(1);
   const [search, setSearch] = useState("");
 
   const filteredItems = useMemo(() => {
     return items.filter((item) => {
-      const matchesCategory = activeCategory ? item.categoryId === activeCategory : true;
+      const selected = categories.find((category) => category.id === activeCategory);
+      const matchesCategory =
+        !selected || selected.name === "Все игры" ? true : item.categoryName === selected.name;
       const matchesSearch = item.name.toLowerCase().includes(search.toLowerCase());
       return matchesCategory && matchesSearch;
     });
-  }, [items, activeCategory, search]);
+  }, [items, activeCategory, search, categories]);
 
   useEffect(() => {
     if (!localStorage.getItem("shop_welcome_seen")) {
