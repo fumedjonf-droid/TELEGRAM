@@ -4,10 +4,10 @@ import { useCartStore } from "../../store/cart.store";
 import { formatMoney } from "../../utils/formatMoney";
 import { motion } from "framer-motion";
 import { useQuery } from "@tanstack/react-query";
-import { fetchPaymentQr, fetchPayments } from "../../api/payments.api";
+import { fetchPayments } from "../../api/payments.api";
 import { createOrder, markPaid, uploadProof } from "../../api/orders.api";
 
-const paymentMethods = ["DC", "Карта", "QR"] as const;
+const paymentMethods = ["DC", "Карта"] as const;
 
 export const Checkout = () => {
   const items = useCartStore((state) => state.items);
@@ -22,11 +22,6 @@ export const Checkout = () => {
   const [orderStatus, setOrderStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const { data: payments } = useQuery({ queryKey: ["payments"], queryFn: fetchPayments });
-  const { data: qrData } = useQuery({
-    queryKey: ["payments", "qr"],
-    queryFn: fetchPaymentQr,
-    enabled: Boolean(payments?.qr),
-  });
   const canConfirm = useMemo(() => {
     return Boolean(gameId && paymentMethod && proof);
   }, [gameId, paymentMethod, proof]);
@@ -100,22 +95,15 @@ export const Checkout = () => {
       <div className="section">
         <label>Метод оплаты</label>
         <div className="payment-grid">
-          {paymentMethods
-            .filter((method) => {
-              if (method === "QR") {
-                return Boolean(payments?.qr);
-              }
-              return true;
-            })
-            .map((method) => (
-              <button
-                key={method}
-                className={`payment-tile ${paymentMethod === method ? "active" : ""}`}
-                onClick={() => setPaymentMethod(method)}
-              >
-                {method}
-              </button>
-            ))}
+          {paymentMethods.map((method) => (
+            <button
+              key={method}
+              className={`payment-tile ${paymentMethod === method ? "active" : ""}`}
+              onClick={() => setPaymentMethod(method)}
+            >
+              {method}
+            </button>
+          ))}
         </div>
         {paymentMethod === "DC" && payments?.dc && (
           <div className="requisites">
@@ -127,12 +115,6 @@ export const Checkout = () => {
           <div className="requisites">
             <div className="requisites-title">Реквизиты карты</div>
             <div className="requisites-body">{payments.card}</div>
-          </div>
-        )}
-        {paymentMethod === "QR" && qrData?.url && (
-          <div className="requisites">
-            <div className="requisites-title">QR для оплаты</div>
-            <img className="qr-image" src={qrData.url} alt="QR" />
           </div>
         )}
       </div>

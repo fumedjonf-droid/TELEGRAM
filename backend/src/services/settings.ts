@@ -1,23 +1,21 @@
 import { getDb, nowIso } from "../db/index.js";
 
-export type PaymentType = "dc" | "card" | "qr";
+export type PaymentType = "dc" | "card";
 
 const SETTING_KEYS = {
   dc: "payment_dc_requisites",
   card: "payment_card_requisites",
-  qr: "payment_qr_image",
 } as const;
 
 export const getPaymentSettings = () => {
   const db = getDb();
   const rows = db
-    .prepare("SELECT key, value FROM settings WHERE key IN (?, ?, ?)")
-    .all(SETTING_KEYS.dc, SETTING_KEYS.card, SETTING_KEYS.qr) as { key: string; value: string }[];
+    .prepare("SELECT key, value FROM settings WHERE key IN (?, ?)")
+    .all(SETTING_KEYS.dc, SETTING_KEYS.card) as { key: string; value: string }[];
   const map = new Map(rows.map((row) => [row.key, row.value]));
   return {
     dc: map.get(SETTING_KEYS.dc) ?? null,
     card: map.get(SETTING_KEYS.card) ?? null,
-    qr: map.get(SETTING_KEYS.qr) ?? null,
   };
 };
 

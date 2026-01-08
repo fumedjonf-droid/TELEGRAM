@@ -316,12 +316,6 @@ body {
   color: #475569;
 }
 
-.qr-image {
-  width: 100%;
-  border-radius: 12px;
-  margin-top: 8px;
-}
-
 .orders-list {
   display: grid;
   gap: 12px;

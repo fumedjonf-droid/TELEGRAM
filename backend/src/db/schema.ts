@@ -84,7 +84,7 @@ CREATE TABLE IF NOT EXISTS settings (
 
 CREATE TABLE IF NOT EXISTS payment_history (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  type TEXT NOT NULL CHECK(type IN ('dc', 'card', 'qr')),
+  type TEXT NOT NULL CHECK(type IN ('dc', 'card')),
   value TEXT NOT NULL,
   changed_by TEXT NOT NULL,
   created_at TEXT NOT NULL

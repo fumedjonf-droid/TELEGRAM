@@ -5,7 +5,6 @@ import fs from "fs";
 import helmet from "helmet";
 import cors from "cors";
 import rateLimit from "express-rate-limit";
-import https from "https";
 import { config } from "../config.js";
 import { getDb, nowIso } from "../db/index.js";
 import { isValidGameId, isValidQuantity } from "../utils/validators.js";
@@ -123,50 +122,14 @@ export const createServer = () => {
     const db = getDb();
     const rows = db
       .prepare(
-        "SELECT key, value FROM settings WHERE key IN ('payment_dc_requisites', 'payment_card_requisites', 'payment_qr_image')"
+        "SELECT key, value FROM settings WHERE key IN ('payment_dc_requisites', 'payment_card_requisites')"
       )
       .all() as { key: string; value: string }[];
     const map = new Map(rows.map((row) => [row.key, row.value]));
     res.json({
       dc: map.get("payment_dc_requisites") ?? null,
       card: map.get("payment_card_requisites") ?? null,
-      qr: map.get("payment_qr_image") ?? null,
     });
-  });
-
-  app.get("/api/payments/qr", (_req, res) => {
-    const db = getDb();
-    const setting = db
-      .prepare("SELECT value FROM settings WHERE key = 'payment_qr_image'")
-      .get() as { value: string } | undefined;
-    if (!setting) {
-      return res.status(404).json({ error: "qr_not_set" });
-    }
-    if (setting.value.startsWith("http")) {
-      return res.json({ url: setting.value });
-    }
-    const fileId = setting.value;
-    const url = `https://api.telegram.org/bot${config.BOT_TOKEN}/getFile?file_id=${fileId}`;
-    https
-      .get(url, (resp) => {
-        let data = "";
-        resp.on("data", (chunk) => {
-          data += chunk;
-        });
-        resp.on("end", () => {
-          try {
-            const parsed = JSON.parse(data) as { ok: boolean; result?: { file_path?: string } };
-            if (!parsed.ok || !parsed.result?.file_path) {
-              return res.status(500).json({ error: "qr_fetch_failed" });
-            }
-            const fileUrl = `https://api.telegram.org/file/bot${config.BOT_TOKEN}/${parsed.result.file_path}`;
-            return res.json({ url: fileUrl });
-          } catch {
-            return res.status(500).json({ error: "qr_fetch_failed" });
-          }
-        });
-      })
-      .on("error", () => res.status(500).json({ error: "qr_fetch_failed" }));
   });
 
   app.post("/api/orders", requireTelegramAuth, (req: AuthedRequest, res) => {
@@ -178,6 +141,9 @@ export const createServer = () => {
 
     if (!req.user || !gameId || !paymentMethod || !items?.length) {
       return res.status(400).json({ error: "missing_fields" });
+    }
+    if (!["DC", "Карта", "dc", "card"].includes(paymentMethod)) {
+      return res.status(400).json({ error: "invalid_payment_method" });
     }
     if (!isValidGameId(gameId)) {
       return res.status(400).json({ error: "invalid_game_id" });

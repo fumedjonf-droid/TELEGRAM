@@ -16,15 +16,15 @@ const HELP_TEXT = `
 /send <telegram_id> <text> — сообщение одному пользователю (Admin/Owner)
 /broadcast <text> — рассылка всем (Owner)
 /payments — показать реквизиты (Admin/Owner)
-/setpayment <dc|card|qr> — установить реквизиты (Admin/Owner)
-/delpayment <dc|card|qr> — удалить реквизиты (Admin/Owner)
+/setpayment <dc|card> — установить реквизиты (Admin/Owner)
+/delpayment <dc|card> — удалить реквизиты (Admin/Owner)
 /grant <telegram_id> <role> — выдать доступ (Owner)
 /revoke <telegram_id> — забрать доступ (Owner)
 /admins — список админов/ролей (Owner)
 `.trim();
 
 type Role = "owner" | "admin" | "moderator";
-type PendingPayment = { type: "dc" | "card" | "qr" };
+type PendingPayment = { type: "dc" | "card" };
 type PendingItem = {
   mode: "create" | "edit";
   id?: number;
@@ -276,25 +276,24 @@ export const createBot = () => {
     const message = [
       `DC: ${payments.dc ?? "не задано"}`,
       `Card: ${payments.card ?? "не задано"}`,
-      `QR: ${payments.qr ?? "не задано"}`,
     ].join("\n");
     await ctx.reply(message);
   });
 
   bot.command("setpayment", requireAdminChat, requireRole(["owner", "admin"]), async (ctx) => {
     const [_, type] = ctx.message.text.split(" ");
-    if (!type || !["dc", "card", "qr"].includes(type)) {
-      await ctx.reply("Использование: /setpayment <dc|card|qr>");
+    if (!type || !["dc", "card"].includes(type)) {
+      await ctx.reply("Использование: /setpayment <dc|card>");
       return;
     }
     pendingPayments.set(String(ctx.from.id), { type: type as PendingPayment["type"] });
-    await ctx.reply(`Отправьте ${type === "qr" ? "фото" : "текст"} реквизитов для ${type}.`);
+    await ctx.reply(`Отправьте текст реквизитов для ${type}.`);
   });
 
   bot.command("delpayment", requireAdminChat, requireRole(["owner", "admin"]), async (ctx) => {
     const [_, type] = ctx.message.text.split(" ");
-    if (!type || !["dc", "card", "qr"].includes(type)) {
-      await ctx.reply("Использование: /delpayment <dc|card|qr>");
+    if (!type || !["dc", "card"].includes(type)) {
+      await ctx.reply("Использование: /delpayment <dc|card>");
       return;
     }
     deletePaymentSetting(type as PendingPayment["type"], String(ctx.from.id));
@@ -304,18 +303,6 @@ export const createBot = () => {
   bot.on(["text", "photo"], requireAdminChat, requireRole(["owner", "admin"]), async (ctx) => {
     const pending = pendingPayments.get(String(ctx.from.id));
     if (pending) {
-      if (pending.type === "qr") {
-        const photos = ctx.message.photo;
-        if (!photos?.length) {
-          await ctx.reply("Отправьте фото QR.");
-          return;
-        }
-        const fileId = photos[photos.length - 1].file_id;
-        setPaymentSetting("qr", fileId, String(ctx.from.id));
-        pendingPayments.delete(String(ctx.from.id));
-        await ctx.reply("✅ QR реквизиты обновлены.");
-        return;
-      }
       const text = ctx.message.text?.trim();
       if (!text) {
         await ctx.reply("Отправьте текст реквизитов.");
