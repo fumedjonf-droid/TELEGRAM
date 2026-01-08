@@ -1,0 +1,485 @@
+import express from "express";
+import multer from "multer";
+import path from "path";
+import fs from "fs";
+import helmet from "helmet";
+import cors from "cors";
+import rateLimit from "express-rate-limit";
+import https from "https";
+import { pipeline } from "stream";
+import { promisify } from "util";
+import { config } from "../config.js";
+import { getDb, nowIso } from "../db/index.js";
+import { isValidGameId, isValidQuantity } from "../utils/validators.js";
+import { parseUserFromInitData, validateInitData } from "../services/telegramAuth.js";
+
+const uploadsDir = path.resolve("uploads");
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
+
+const sanitizeFilename = (name: string) => {
+  const base = path.basename(name).replace(/[^a-zA-Z0-9._-]/g, "_");
+  return base.slice(0, 64) || "file";
+};
+
+const upload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, uploadsDir),
+    filename: (_req, file, cb) => cb(null, `${Date.now()}-${sanitizeFilename(file.originalname)}`),
+  }),
+  limits: { fileSize: 5 * 1024 * 1024, files: 1 },
+  fileFilter: (_req, file, cb) => {
+    const allowed = ["image/jpeg", "image/png", "application/pdf"];
+    if (!allowed.includes(file.mimetype)) {
+      cb(new Error("unsupported_file_type"));
+      return;
+    }
+    cb(null, true);
+  },
+});
+
+type AuthedRequest = express.Request & { user?: { telegramId: string; username?: string } };
+
+const sendError = (res: express.Response, status: number, code: string, message?: string) =>
+  res.status(status).json({ error: { code, message } });
+
+const requireTelegramAuth = (req: AuthedRequest, res: express.Response, next: express.NextFunction) => {
+  const initData = req.header("X-TG-INIT-DATA");
+  if (!initData || !validateInitData(initData, config.BOT_TOKEN)) {
+    return sendError(res, 401, "invalid_init_data");
+  }
+  const user = parseUserFromInitData(initData);
+  if (!user) {
+    return sendError(res, 400, "missing_user");
+  }
+  req.user = { telegramId: user.id, username: user.username };
+  next();
+};
+
+export const createServer = () => {
+  const app = express();
+  app.use(helmet());
+  app.use(
+    cors({
+      origin: config.WEBAPP_ORIGIN,
+      credentials: true,
+    })
+  );
+  app.use(
+    rateLimit({
+      windowMs: 10 * 60 * 1000,
+      limit: 60,
+      handler: (_req, res) => sendError(res, 429, "rate_limit_exceeded"),
+    })
+  );
+  app.use(express.json());
+
+  const orderLimiter = rateLimit({
+    windowMs: 10 * 60 * 1000,
+    limit: 5,
+    handler: (_req, res) => sendError(res, 429, "rate_limit_exceeded"),
+  });
+  const gameCheckLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    limit: 15,
+    handler: (_req, res) => sendError(res, 429, "rate_limit_exceeded"),
+  });
+
+  app.get("/health", (_req, res) => {
+    res.json({ ok: true });
+  });
+
+  app.get("/", (_req, res) => {
+    res.json({ ok: true, service: "telegram-shop-backend" });
+  });
+
+  app.post("/api/auth/telegram", (req, res) => {
+    const { initData } = req.body as { initData?: string };
+    if (!initData || !validateInitData(initData, config.BOT_TOKEN)) {
+      return sendError(res, 401, "invalid_init_data");
+    }
+    const user = parseUserFromInitData(initData);
+    if (!user) {
+      return sendError(res, 400, "missing_user");
+    }
+    const db = getDb();
+    const now = nowIso();
+    const existing = db
+      .prepare("SELECT id FROM users WHERE telegram_id = ?")
+      .get(user.id) as { id: number } | undefined;
+    if (existing) {
+      db.prepare("UPDATE users SET last_seen_at = ?, username = ?, first_name = ?, updated_at = ? WHERE id = ?")
+        .run(now, user.username ?? null, user.first_name ?? null, now, existing.id);
+    } else {
+      db.prepare(
+        "INSERT INTO users (telegram_id, username, first_name, created_at, last_seen_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)"
+      ).run(user.id, user.username ?? null, user.first_name ?? null, now, now, now);
+    }
+    return res.json({ ok: true, telegramId: user.id });
+  });
+
+  app.get("/api/items", (_req, res) => {
+    const db = getDb();
+    const items = db
+      .prepare(
+        "SELECT items.id, items.name, items.description, items.price, items.category_id as categoryId, categories.name as categoryName, items.image_url as imageUrl, items.image_file_id as imageFileId, items.is_active as isActive FROM items LEFT JOIN categories ON categories.id = items.category_id WHERE items.is_active = 1 ORDER BY items.created_at DESC"
+      )
+      .all() as {
+      id: number;
+      name: string;
+      description?: string;
+      price: number;
+      categoryId?: number;
+      categoryName?: string | null;
+      imageUrl?: string | null;
+      imageFileId?: string | null;
+      isActive: number;
+    }[];
+    const mapped = items.map((item) => ({
+      ...item,
+      imageUrl: item.imageUrl ?? (item.imageFileId ? `/api/images/telegram/${item.imageFileId}` : null),
+    }));
+    res.json(mapped);
+  });
+
+  app.get("/api/categories", (_req, res) => {
+    const db = getDb();
+    const categories = db
+      .prepare(
+        "SELECT id, name, icon_url as iconUrl, sort_order as sortOrder, is_active as isActive FROM categories WHERE is_active = 1 ORDER BY sort_order ASC"
+      )
+      .all();
+    res.json(categories);
+  });
+
+  const imageLimiter = rateLimit({
+    windowMs: 60_000,
+    limit: 60,
+    handler: (_req, res) => sendError(res, 429, "rate_limit_exceeded"),
+  });
+
+  app.get("/api/images/telegram/:fileId", imageLimiter, async (req, res) => {
+    const fileId = req.params.fileId;
+    if (!fileId) {
+      return sendError(res, 400, "missing_file_id");
+    }
+    const db = getDb();
+    const exists = db
+      .prepare("SELECT 1 FROM items WHERE image_file_id = ? LIMIT 1")
+      .get(fileId) as { 1: number } | undefined;
+    if (!exists) {
+      return sendError(res, 404, "file_not_found");
+    }
+    const metaUrl = `https://api.telegram.org/bot${config.BOT_TOKEN}/getFile?file_id=${encodeURIComponent(fileId)}`;
+    https
+      .get(metaUrl, (metaResp) => {
+        let data = "";
+        metaResp.on("data", (chunk) => {
+          data += chunk;
+        });
+        metaResp.on("end", async () => {
+          try {
+            const parsed = JSON.parse(data) as { ok: boolean; result?: { file_path?: string } };
+            if (!parsed.ok || !parsed.result?.file_path) {
+              return sendError(res, 404, "file_not_found");
+            }
+            const filePath = parsed.result.file_path;
+            const fileUrl = `https://api.telegram.org/file/bot${config.BOT_TOKEN}/${filePath}`;
+            https
+              .get(fileUrl, async (fileResp) => {
+                const ct = filePath.endsWith(".png")
+                  ? "image/png"
+                  : filePath.endsWith(".jpg") || filePath.endsWith(".jpeg")
+                    ? "image/jpeg"
+                    : "application/octet-stream";
+                res.setHeader("Content-Type", ct);
+                res.setHeader("Cache-Control", "public, max-age=86400");
+                try {
+                  await pipe(fileResp, res);
+                } catch {
+                  res.status(500).end();
+                }
+              })
+              .on("error", () => sendError(res, 500, "file_fetch_failed"));
+          } catch {
+            return sendError(res, 500, "file_fetch_failed");
+          }
+        });
+      })
+      .on("error", () => sendError(res, 500, "file_fetch_failed"));
+  });
+
+  app.get("/api/payments", (_req, res) => {
+    const db = getDb();
+    const rows = db
+      .prepare(
+        "SELECT key, value FROM settings WHERE key IN ('payment_dc_requisites', 'payment_card_requisites')"
+      )
+      .all() as { key: string; value: string }[];
+    const map = new Map(rows.map((row) => [row.key, row.value]));
+    res.json({
+      dc: map.get("payment_dc_requisites") ?? null,
+      card: map.get("payment_card_requisites") ?? null,
+    });
+  });
+
+  app.post("/api/orders", requireTelegramAuth, orderLimiter, (req: AuthedRequest, res) => {
+    const { gameId, gameNick, paymentMethod, items } = req.body as {
+      gameId?: string;
+      gameNick?: string;
+      paymentMethod?: string;
+      items?: { itemId: number; qty: number }[];
+    };
+
+    if (!req.user || !gameId || !paymentMethod || !items?.length) {
+      return sendError(res, 400, "missing_fields");
+    }
+    if (!["DC", "Карта", "СБП 1", "СБП 2", "Картой", "dc", "card"].includes(paymentMethod)) {
+      return sendError(res, 400, "invalid_payment_method");
+    }
+    if (!isValidGameId(gameId)) {
+      return sendError(res, 400, "invalid_game_id");
+    }
+
+    const db = getDb();
+    try {
+      const result = db.transaction(() => {
+        const user = db
+          .prepare("SELECT id FROM users WHERE telegram_id = ?")
+          .get(req.user!.telegramId) as { id: number } | undefined;
+        if (!user) {
+          return { error: { status: 404, code: "user_not_found" } };
+        }
+        const existingPending = db
+          .prepare(
+            "SELECT id FROM orders WHERE user_id = ? AND status IN ('pending', 'awaiting_proof', 'paid_review') LIMIT 1"
+          )
+          .get(user.id) as { id: number } | undefined;
+        if (existingPending) {
+          return { error: { status: 429, code: "active_order_exists" } };
+        }
+
+        const itemIds = items.map((item) => item.itemId);
+        const dbItems = db
+          .prepare(
+            `SELECT id, price FROM items WHERE is_active = 1 AND id IN (${itemIds.map(() => "?").join(", ")})`
+          )
+          .all(...itemIds) as { id: number; price: number }[];
+
+        if (dbItems.length !== itemIds.length) {
+          return { error: { status: 400, code: "invalid_items" } };
+        }
+
+        const priceMap = new Map(dbItems.map((item) => [item.id, item.price]));
+        let total = 0;
+        for (const item of items) {
+          if (!isValidQuantity(item.qty)) {
+            return { error: { status: 400, code: "invalid_qty" } };
+          }
+          total += (priceMap.get(item.itemId) ?? 0) * item.qty;
+        }
+
+        const now = nowIso();
+        const result = db
+          .prepare(
+            "INSERT INTO orders (user_id, game_id, game_nick, status, total_amount, payment_method, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+          )
+          .run(user.id, gameId, gameNick ?? null, "pending", total, paymentMethod, now, now);
+
+        const orderId = Number(result.lastInsertRowid);
+        const insertOrderItem = db.prepare(
+          "INSERT INTO order_items (order_id, item_id, qty, price_snapshot) VALUES (?, ?, ?, ?)"
+        );
+        for (const item of items) {
+          insertOrderItem.run(orderId, item.itemId, item.qty, priceMap.get(item.itemId));
+        }
+
+        return { orderId, totalAmount: total };
+      })();
+
+      if ("error" in result) {
+        return sendError(res, result.error.status, result.error.code);
+      }
+      return res.json({ orderId: result.orderId, status: "pending", totalAmount: result.totalAmount });
+    } catch {
+      return sendError(res, 500, "order_create_failed");
+    }
+  });
+
+  app.post("/api/orders/:id/proof", requireTelegramAuth, upload.single("file"), (req: AuthedRequest, res) => {
+    const orderId = Number(req.params.id);
+    const { proofFileId, proofType } = req.body as { proofFileId?: string; proofType?: string };
+
+    if (!orderId) {
+      return sendError(res, 400, "invalid_order");
+    }
+
+    if (!proofFileId && !req.file) {
+      return sendError(res, 400, "missing_proof");
+    }
+
+    const db = getDb();
+    try {
+      const result = db.transaction(() => {
+        const order = db
+          .prepare(
+            "SELECT orders.id, users.telegram_id as telegramId FROM orders JOIN users ON users.id = orders.user_id WHERE orders.id = ?"
+          )
+          .get(orderId) as { id: number; telegramId: string } | undefined;
+        if (!order) {
+          return { error: { status: 404, code: "order_not_found" } };
+        }
+        if (!req.user || order.telegramId !== req.user.telegramId) {
+          return { error: { status: 403, code: "forbidden" } };
+        }
+        const proofValue = proofFileId ?? null;
+        const typeValue = proofType ?? (req.file ? req.file.mimetype : null);
+        const proofPath = req.file ? req.file.path : null;
+        const now = nowIso();
+        const updated = db
+          .prepare(
+            "UPDATE orders SET proof_file_id = ?, proof_type = ?, proof_received_at = ?, proof_path = ?, updated_at = ? WHERE id = ?"
+          )
+          .run(proofValue, typeValue, now, proofPath, now, orderId);
+
+        if (updated.changes === 0) {
+          return { error: { status: 404, code: "order_not_found" } };
+        }
+        return { ok: true };
+      })();
+      if ("error" in result) {
+        return sendError(res, result.error.status, result.error.code);
+      }
+      return res.json({ ok: true });
+    } catch {
+      return sendError(res, 500, "proof_upload_failed");
+    }
+  });
+
+  app.post("/api/orders/:id/mark-paid", requireTelegramAuth, async (req: AuthedRequest, res) => {
+    const orderId = Number(req.params.id);
+    if (!orderId) {
+      return sendError(res, 400, "invalid_order");
+    }
+    const db = getDb();
+    try {
+      const result = db.transaction(() => {
+        const order = db
+          .prepare(
+            "SELECT orders.id, orders.proof_file_id as proofFileId, orders.proof_path as proofPath, orders.status, users.telegram_id as telegramId FROM orders JOIN users ON users.id = orders.user_id WHERE orders.id = ?"
+          )
+          .get(orderId) as
+          | { proofFileId?: string; proofPath?: string | null; status: string; telegramId: string }
+          | undefined;
+
+        if (!order) {
+          return { error: { status: 404, code: "order_not_found" } };
+        }
+        if (!req.user || order.telegramId !== req.user.telegramId) {
+          return { error: { status: 403, code: "forbidden" } };
+        }
+        if (!order.proofFileId && !order.proofPath) {
+          return {
+            error: {
+              status: 400,
+              code: "proof_required",
+              message:
+                "❗️Чтобы мы подтвердили оплату, прикрепите чек/скрин оплаты (фото или файл). После отправки чека нажмите «Я оплатил(а)» ещё раз.",
+            },
+          };
+        }
+
+        const now = nowIso();
+        const result = db
+          .prepare(
+            "UPDATE orders SET status = ?, updated_at = ? WHERE id = ? AND status IN ('pending', 'awaiting_proof')"
+          )
+          .run("paid_review", now, orderId);
+        if (result.changes === 0) {
+          return { error: { status: 409, code: "invalid_status_transition" } };
+        }
+        db.prepare(
+          "INSERT INTO order_outbox (order_id, event_type, created_at) VALUES (?, ?, ?)"
+        ).run(orderId, "order_ready_for_review", now);
+        return { ok: true };
+      })();
+      if ("error" in result) {
+        return sendError(res, result.error.status, result.error.code, result.error.message);
+      }
+      return res.json({ ok: true, status: "paid_review" });
+    } catch {
+      return sendError(res, 500, "mark_paid_failed");
+    }
+  });
+
+  app.post("/api/game/check", gameCheckLimiter, (req, res) => {
+    const { gameId } = req.body as { gameId?: string };
+    if (!gameId || !isValidGameId(gameId)) {
+      return sendError(res, 400, "invalid_game_id");
+    }
+    const nickname = `Player${gameId.slice(-4)}`;
+    return res.json({ ok: true, nickname });
+  });
+
+  app.get("/api/orders/my", requireTelegramAuth, (req: AuthedRequest, res) => {
+    if (!req.user) {
+      return sendError(res, 401, "unauthorized");
+    }
+    const db = getDb();
+    const orders = db
+      .prepare(
+        "SELECT orders.id, orders.status, orders.total_amount as totalAmount, orders.created_at as createdAt FROM orders JOIN users ON users.id = orders.user_id WHERE users.telegram_id = ? ORDER BY orders.created_at DESC"
+      )
+      .all(req.user.telegramId);
+    res.json(orders);
+  });
+
+  app.get("/api/orders/:id", requireTelegramAuth, (req: AuthedRequest, res) => {
+    const orderId = Number(req.params.id);
+    if (!req.user || !orderId) {
+      return sendError(res, 400, "invalid_order");
+    }
+    const db = getDb();
+    const order = db
+      .prepare(
+        "SELECT orders.id, orders.status, orders.total_amount as totalAmount, orders.game_id as gameId, orders.game_nick as gameNick, orders.payment_method as paymentMethod, orders.proof_file_id as proofFileId, orders.proof_path as proofPath, orders.created_at as createdAt, users.telegram_id as telegramId FROM orders JOIN users ON users.id = orders.user_id WHERE orders.id = ?"
+      )
+      .get(orderId) as
+      | {
+          id: number;
+          status: string;
+          totalAmount: number;
+          gameId: string;
+          gameNick?: string | null;
+          paymentMethod: string;
+          proofFileId?: string | null;
+          proofPath?: string | null;
+          createdAt: string;
+          telegramId: string;
+        }
+      | undefined;
+    if (!order) {
+      return sendError(res, 404, "order_not_found");
+    }
+    if (order.telegramId !== req.user.telegramId) {
+      return sendError(res, 403, "forbidden");
+    }
+    const items = db
+      .prepare(
+        "SELECT items.name, order_items.qty, order_items.price_snapshot as priceSnapshot FROM order_items JOIN items ON items.id = order_items.item_id WHERE order_items.order_id = ?"
+      )
+      .all(orderId);
+    return res.json({ ...order, items });
+  });
+
+  app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    if (err.message === "unsupported_file_type") {
+      return sendError(res, 400, "unsupported_file_type");
+    }
+    return sendError(res, 500, "internal_error");
+  });
+
+  return app;
+};
+const pipe = promisify(pipeline);
