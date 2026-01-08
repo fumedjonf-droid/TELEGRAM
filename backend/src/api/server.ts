@@ -57,6 +57,7 @@ const requireTelegramAuth = (req: AuthedRequest, res: express.Response, next: ex
 
 export const createServer = () => {
   const app = express();
+  app.set("trust proxy", true);
   app.use(helmet());
   app.use(
     cors({
@@ -74,6 +75,10 @@ export const createServer = () => {
 
   app.get("/health", (_req, res) => {
     res.json({ ok: true });
+  });
+
+  app.get("/", (_req, res) => {
+    res.json({ ok: true, service: "telegram-shop-backend" });
   });
 
   app.post("/api/auth/telegram", (req, res) => {
