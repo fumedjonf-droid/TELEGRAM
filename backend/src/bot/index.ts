@@ -383,9 +383,13 @@ export const createBot = () => {
   });
 
   bot.on(["text", "photo"], requireAdminChat, requireRole(["owner", "admin"]), async (ctx) => {
+    const incomingText = ctx.message.text?.trim();
+    if (incomingText?.startsWith("/")) {
+      return;
+    }
     const pending = pendingPayments.get(String(ctx.from.id));
     if (pending) {
-      const text = ctx.message.text?.trim();
+      const text = incomingText;
       if (!text) {
         await ctx.reply("Отправьте текст реквизитов.");
         return;
@@ -433,7 +437,7 @@ export const createBot = () => {
       return;
     }
 
-    const text = ctx.message.text?.trim();
+    const text = incomingText;
     if (!text) {
       await ctx.reply("Отправьте текст.");
       return;
