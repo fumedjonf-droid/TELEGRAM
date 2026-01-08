@@ -118,6 +118,68 @@ export const createBot = () => {
     await ctx.reply(message);
   });
 
+  bot.command("order", requireAdminChat, requireRole(["owner", "admin", "moderator"]), async (ctx) => {
+    const [_, idRaw] = ctx.message.text.split(" ");
+    const id = Number(idRaw);
+    if (!id) {
+      await ctx.reply("Использование: /order <id>");
+      return;
+    }
+    const db = getDb();
+    const order = db
+      .prepare(
+        `SELECT orders.id, orders.status, orders.total_amount as totalAmount, orders.game_id as gameId,
+        orders.payment_method as paymentMethod, orders.proof_file_id as proofFileId, orders.proof_type as proofType,
+        orders.created_at as createdAt, users.telegram_id as telegramId, users.username as username
+        FROM orders JOIN users ON users.id = orders.user_id WHERE orders.id = ?`
+      )
+      .get(id) as
+      | {
+          id: number;
+          status: string;
+          totalAmount: number;
+          gameId: string;
+          paymentMethod: string;
+          proofFileId?: string | null;
+          proofType?: string | null;
+          createdAt: string;
+          telegramId: string;
+          username?: string | null;
+        }
+      | undefined;
+    if (!order) {
+      await ctx.reply("Заказ не найден.");
+      return;
+    }
+    const items = db
+      .prepare(
+        `SELECT items.name, order_items.qty, order_items.price_snapshot as priceSnapshot
+         FROM order_items JOIN items ON items.id = order_items.item_id WHERE order_items.order_id = ?`
+      )
+      .all(id) as { name: string; qty: number; priceSnapshot: number }[];
+    const itemLines = items.map((item) => `${item.name} × ${item.qty} (${item.priceSnapshot})`).join("\n");
+    const userLabel = order.username ? `@${order.username}` : order.telegramId;
+    const message = [
+      `🧾 Заказ #${order.id}`,
+      `👤 ${userLabel}`,
+      `🎮 ID: ${order.gameId}`,
+      `💰 Сумма: ${order.totalAmount}`,
+      `💳 Оплата: ${order.paymentMethod}`,
+      `📎 Чек: ${order.proofFileId ? "есть" : "нет"}`,
+      `Статус: ${order.status}`,
+      `Создан: ${order.createdAt}`,
+      `Товары:\n${itemLines}`,
+    ].join("\n");
+    await ctx.reply(message);
+    if (order.proofFileId) {
+      if (order.proofType?.startsWith("image/")) {
+        await ctx.replyWithPhoto(order.proofFileId);
+      } else {
+        await ctx.replyWithDocument(order.proofFileId);
+      }
+    }
+  });
+
   bot.command("listitems", requireAdminChat, requireRole(["owner", "admin"]), async (ctx) => {
     const db = getDb();
     const items = db

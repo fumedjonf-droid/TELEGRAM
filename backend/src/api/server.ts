@@ -5,6 +5,7 @@ import fs from "fs";
 import helmet from "helmet";
 import cors from "cors";
 import rateLimit from "express-rate-limit";
+import https from "https";
 import { config } from "../config.js";
 import { getDb, nowIso } from "../db/index.js";
 import { isValidGameId, isValidQuantity } from "../utils/validators.js";
@@ -104,8 +105,21 @@ export const createServer = () => {
       .prepare(
         "SELECT id, name, description, price, category_id as categoryId, image_url as imageUrl, image_file_id as imageFileId, is_active as isActive FROM items WHERE is_active = 1"
       )
-      .all();
-    res.json(items);
+      .all() as {
+      id: number;
+      name: string;
+      description?: string;
+      price: number;
+      categoryId?: number;
+      imageUrl?: string | null;
+      imageFileId?: string | null;
+      isActive: number;
+    }[];
+    const mapped = items.map((item) => ({
+      ...item,
+      imageUrl: item.imageUrl ?? (item.imageFileId ? `/api/images/telegram/${item.imageFileId}` : null),
+    }));
+    res.json(mapped);
   });
 
   app.get("/api/categories", (_req, res) => {
@@ -116,6 +130,34 @@ export const createServer = () => {
       )
       .all();
     res.json(categories);
+  });
+
+  app.get("/api/images/telegram/:fileId", (_req, res) => {
+    const fileId = _req.params.fileId;
+    if (!fileId) {
+      return res.status(400).json({ error: "missing_file_id" });
+    }
+    const url = `https://api.telegram.org/bot${config.BOT_TOKEN}/getFile?file_id=${fileId}`;
+    https
+      .get(url, (resp) => {
+        let data = "";
+        resp.on("data", (chunk) => {
+          data += chunk;
+        });
+        resp.on("end", () => {
+          try {
+            const parsed = JSON.parse(data) as { ok: boolean; result?: { file_path?: string } };
+            if (!parsed.ok || !parsed.result?.file_path) {
+              return res.status(404).json({ error: "file_not_found" });
+            }
+            const fileUrl = `https://api.telegram.org/file/bot${config.BOT_TOKEN}/${parsed.result.file_path}`;
+            return res.redirect(fileUrl);
+          } catch {
+            return res.status(500).json({ error: "file_fetch_failed" });
+          }
+        });
+      })
+      .on("error", () => res.status(500).json({ error: "file_fetch_failed" }));
   });
 
   app.get("/api/payments", (_req, res) => {

@@ -18,10 +18,23 @@ export const Cart = () => {
         animate={{ y: 0, opacity: 1 }}
         exit={{ y: 300, opacity: 0 }}
         transition={{ type: "spring", stiffness: 260, damping: 24 }}
+        drag="y"
+        dragConstraints={{ top: 0, bottom: 0 }}
+        dragElastic={0.2}
+        onDragEnd={(_, info) => {
+          if (info.offset.y > 120) {
+            navigate(-1);
+          }
+        }}
       >
         <div className="sheet-header">
           <div className="sheet-handle" />
-          <h2>Корзина</h2>
+          <div className="sheet-title">
+            <h2>Корзина</h2>
+            <button className="button" onClick={() => navigate(-1)}>
+              Закрыть
+            </button>
+          </div>
         </div>
         {items.length === 0 ? (
           <div className="empty-state">
