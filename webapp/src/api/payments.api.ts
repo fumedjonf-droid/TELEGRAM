@@ -7,3 +7,5 @@ export type PaymentSettings = {
 };
 
 export const fetchPayments = () => apiClient<PaymentSettings>("/api/payments");
+
+export const fetchPaymentQr = () => apiClient<{ url: string }>("/api/payments/qr");
