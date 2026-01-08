@@ -16,9 +16,14 @@ if (!existingOwner) {
   ).run(config.OWNER_TELEGRAM_ID, config.OWNER_TELEGRAM_ID, nowIso());
 }
 
-const bot = createBot();
-registerOrderActions(bot);
-startOutboxWorker(bot);
+let bot: ReturnType<typeof createBot> | null = null;
+if (config.BOT_ENABLED) {
+  bot = createBot();
+  registerOrderActions(bot);
+  startOutboxWorker(bot);
+} else {
+  logger.info("Bot disabled via BOT_ENABLED=false");
+}
 const app = createServer();
 
 app.listen(config.PORT, () => {
@@ -26,12 +31,14 @@ app.listen(config.PORT, () => {
 });
 
 const startBot = async () => {
+  if (!bot) {
+    return;
+  }
   try {
     await bot.launch();
     logger.info("Bot started");
   } catch (err) {
     logger.error({ err }, "Bot failed to start");
-    process.exit(1);
   }
 };
 
@@ -46,5 +53,5 @@ process.on("uncaughtException", (err) => {
 
 startBot();
 
-process.once("SIGINT", () => bot.stop("SIGINT"));
-process.once("SIGTERM", () => bot.stop("SIGTERM"));
+process.once("SIGINT", () => bot?.stop("SIGINT"));
+process.once("SIGTERM", () => bot?.stop("SIGTERM"));

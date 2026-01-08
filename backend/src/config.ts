@@ -26,7 +26,9 @@ for (const key of required) {
   }
 }
 
-export const config: RequiredEnv & { PORT: number } = {
+const botEnabled = process.env.BOT_ENABLED !== "false";
+
+export const config: RequiredEnv & { PORT: number; BOT_ENABLED: boolean } = {
   BOT_TOKEN: process.env.BOT_TOKEN as string,
   APP_URL: process.env.APP_URL as string,
   ADMIN_GROUP_ID: process.env.ADMIN_GROUP_ID as string,
@@ -34,4 +36,5 @@ export const config: RequiredEnv & { PORT: number } = {
   OWNER_TELEGRAM_ID: process.env.OWNER_TELEGRAM_ID as string,
   WEBAPP_ORIGIN: process.env.WEBAPP_ORIGIN as string,
   PORT: Number(process.env.PORT ?? 3000),
+  BOT_ENABLED: botEnabled,
 };
