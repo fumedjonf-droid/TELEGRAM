@@ -283,6 +283,10 @@ export const createBot = () => {
       await ctx.reply("Использование: /revoke <telegram_id>");
       return;
     }
+    if (telegramId === config.OWNER_TELEGRAM_ID) {
+      await ctx.reply("❌ Нельзя удалить владельца.");
+      return;
+    }
     const db = getDb();
     db.prepare("DELETE FROM admins WHERE telegram_id = ?").run(telegramId);
     await ctx.reply(`✅ Доступ отозван у ${telegramId}.`);
