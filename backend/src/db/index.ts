@@ -77,6 +77,11 @@ export const getDb = (): Db => {
       // ignore if exists
     }
     try {
+      dbInstance.exec("ALTER TABLE items ADD COLUMN promo_end_at TEXT");
+    } catch {
+      // ignore if exists
+    }
+    try {
       dbInstance.exec("ALTER TABLE items ADD COLUMN sort_order INTEGER DEFAULT 0");
     } catch {
       // ignore if exists
@@ -100,6 +105,20 @@ export const getDb = (): Db => {
         source TEXT NOT NULL,
         created_at TEXT NOT NULL,
         FOREIGN KEY (order_id) REFERENCES orders(id)
+      );`
+    );
+    dbInstance.exec(
+      `CREATE TABLE IF NOT EXISTS promos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        code TEXT UNIQUE NOT NULL,
+        type TEXT NOT NULL CHECK(type IN ('percent', 'fixed')),
+        value INTEGER NOT NULL,
+        expires_at TEXT,
+        usage_limit INTEGER,
+        used_count INTEGER NOT NULL DEFAULT 0,
+        is_active INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL,
+        updated_at TEXT
       );`
     );
     try {

@@ -21,6 +21,9 @@ export const ProductCard = ({ item }: { item: Item }) => {
         <div className="card-title">{item.name}</div>
         <div className="card-description">{item.description ?? "Популярный товар"}</div>
         <div className="card-price">{formatMoney(item.price)}</div>
+        {item.promoEndAt && (
+          <div className="card-description">Акция до {new Date(item.promoEndAt).toLocaleString()}</div>
+        )}
         <button
           className={`button ${selected ? "primary" : ""}`}
           onClick={() =>

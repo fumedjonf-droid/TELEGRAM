@@ -45,6 +45,7 @@ CREATE TABLE IF NOT EXISTS items (
   id_rules TEXT,
   provider_key TEXT,
   delivery_type TEXT,
+  promo_end_at TEXT,
   sort_order INTEGER DEFAULT 0,
   is_active INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL,
@@ -115,6 +116,19 @@ CREATE TABLE IF NOT EXISTS payment_history (
   value TEXT NOT NULL,
   changed_by TEXT NOT NULL,
   created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS promos (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  code TEXT UNIQUE NOT NULL,
+  type TEXT NOT NULL CHECK(type IN ('percent', 'fixed')),
+  value INTEGER NOT NULL,
+  expires_at TEXT,
+  usage_limit INTEGER,
+  used_count INTEGER NOT NULL DEFAULT 0,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS order_outbox (

@@ -274,7 +274,7 @@ export const createServer = () => {
     const db = getDb();
     const items = db
       .prepare(
-        "SELECT items.id, items.name, items.description, items.price, items.category_id as categoryId, categories.name as categoryName, items.game_key as gameKey, items.region as region, items.id_rules as idRules, items.provider_key as providerKey, items.delivery_type as deliveryType, items.image_url as imageUrl, items.image_file_id as imageFileId, items.is_active as isActive FROM items LEFT JOIN categories ON categories.id = items.category_id WHERE items.is_active = 1 ORDER BY items.created_at DESC"
+        "SELECT items.id, items.name, items.description, items.price, items.category_id as categoryId, categories.name as categoryName, items.game_key as gameKey, items.region as region, items.id_rules as idRules, items.provider_key as providerKey, items.delivery_type as deliveryType, items.promo_end_at as promoEndAt, items.image_url as imageUrl, items.image_file_id as imageFileId, items.is_active as isActive FROM items LEFT JOIN categories ON categories.id = items.category_id WHERE items.is_active = 1 ORDER BY items.created_at DESC"
       )
       .all() as {
       id: number;
@@ -288,6 +288,7 @@ export const createServer = () => {
       idRules?: string | null;
       providerKey?: string | null;
       deliveryType?: string | null;
+      promoEndAt?: string | null;
       imageUrl?: string | null;
       imageFileId?: string | null;
       isActive: number;
@@ -377,6 +378,45 @@ export const createServer = () => {
     res.json({
       dc: map.get("payment_dc_requisites") ?? null,
       card: map.get("payment_card_requisites") ?? null,
+    });
+  });
+
+  app.post("/api/promos/validate", requireTelegramAuth, (req: AuthedRequest, res) => {
+    const { code } = req.body as { code?: string };
+    if (!code) {
+      return sendError(res, 400, "missing_code");
+    }
+    const db = getDb();
+    const promo = db
+      .prepare(
+        "SELECT code, type, value, expires_at as expiresAt, usage_limit as usageLimit, used_count as usedCount, is_active as isActive FROM promos WHERE code = ?"
+      )
+      .get(code.toUpperCase()) as
+      | {
+          code: string;
+          type: "percent" | "fixed";
+          value: number;
+          expiresAt?: string | null;
+          usageLimit?: number | null;
+          usedCount: number;
+          isActive: number;
+        }
+      | undefined;
+    if (!promo || !promo.isActive) {
+      return sendError(res, 404, "promo_not_found");
+    }
+    if (promo.expiresAt && Date.parse(promo.expiresAt) < Date.now()) {
+      return sendError(res, 400, "promo_expired");
+    }
+    if (promo.usageLimit && promo.usedCount >= promo.usageLimit) {
+      return sendError(res, 400, "promo_exhausted");
+    }
+    return res.json({
+      ok: true,
+      code: promo.code,
+      type: promo.type,
+      value: promo.value,
+      expiresAt: promo.expiresAt ?? null,
     });
   });
 

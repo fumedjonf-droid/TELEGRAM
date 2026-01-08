@@ -3,11 +3,36 @@ import { useCartStore } from "../../store/cart.store";
 import { formatMoney } from "../../utils/formatMoney";
 import { Link, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
+import { useState } from "react";
+import { validatePromo } from "../../api/promos.api";
 
 export const Cart = () => {
   const items = useCartStore((state) => state.items);
   const total = useCartStore((state) => state.totalPrice());
   const navigate = useNavigate();
+  const [promoCode, setPromoCode] = useState("");
+  const [promoError, setPromoError] = useState<string | null>(null);
+  const [discount, setDiscount] = useState<number>(0);
+  const [validating, setValidating] = useState(false);
+
+  const handlePromo = async () => {
+    if (!promoCode) {
+      return;
+    }
+    setValidating(true);
+    setPromoError(null);
+    try {
+      const promo = await validatePromo(promoCode);
+      const nextDiscount =
+        promo.type === "percent" ? Math.round((total * promo.value) / 100) : promo.value;
+      setDiscount(Math.min(nextDiscount, total));
+    } catch {
+      setDiscount(0);
+      setPromoError("Промокод не найден или недействителен.");
+    } finally {
+      setValidating(false);
+    }
+  };
 
   return (
     <PageContainer>
@@ -53,7 +78,22 @@ export const Cart = () => {
                 </li>
               ))}
             </ul>
-            <div className="total">{formatMoney(total)}</div>
+            <div className="section">
+              <label>Промокод</label>
+              <div className="id-row">
+                <input
+                  value={promoCode}
+                  onChange={(event) => setPromoCode(event.target.value.toUpperCase())}
+                  placeholder="Введите промокод"
+                />
+                <button className="button" onClick={handlePromo} disabled={validating}>
+                  {validating ? "Проверяем..." : "Применить"}
+                </button>
+              </div>
+              {promoError && <p className="hint">{promoError}</p>}
+              {discount > 0 && <p className="hint">Скидка: {formatMoney(discount)}</p>}
+            </div>
+            <div className="total">{formatMoney(Math.max(total - discount, 0))}</div>
             <Link className="button primary" to="/checkout">
               Оформить
             </Link>

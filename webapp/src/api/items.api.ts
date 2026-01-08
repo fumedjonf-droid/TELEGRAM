@@ -14,6 +14,7 @@ export type Item = {
   idRules?: string | null;
   providerKey?: string | null;
   deliveryType?: string | null;
+  promoEndAt?: string | null;
 };
 
 export type Category = {
