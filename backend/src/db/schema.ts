@@ -1,0 +1,142 @@
+export const schemaSql = `
+CREATE TABLE IF NOT EXISTS users (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  telegram_id TEXT UNIQUE NOT NULL,
+  username TEXT,
+  first_name TEXT,
+  created_at TEXT NOT NULL,
+  last_seen_at TEXT NOT NULL,
+  updated_at TEXT,
+  is_blocked INTEGER DEFAULT 0,
+  is_suspected INTEGER DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS admins (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  telegram_id TEXT UNIQUE NOT NULL,
+  role TEXT NOT NULL CHECK(role IN ('owner', 'admin', 'moderator', 'support')),
+  added_by TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS categories (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  icon_url TEXT,
+  game_key TEXT NOT NULL DEFAULT 'default',
+  region TEXT NOT NULL DEFAULT 'global',
+  id_rules TEXT,
+  provider_key TEXT,
+  delivery_type TEXT,
+  sort_order INTEGER DEFAULT 0,
+  is_active INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  description TEXT,
+  price INTEGER NOT NULL,
+  category_id INTEGER,
+  image_file_id TEXT,
+  image_url TEXT,
+  game_key TEXT NOT NULL DEFAULT 'default',
+  region TEXT NOT NULL DEFAULT 'global',
+  id_rules TEXT,
+  provider_key TEXT,
+  delivery_type TEXT,
+  promo_end_at TEXT,
+  sort_order INTEGER DEFAULT 0,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (category_id) REFERENCES categories(id)
+);
+
+CREATE TABLE IF NOT EXISTS orders (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  game_key TEXT NOT NULL DEFAULT 'default',
+  game_id TEXT NOT NULL,
+  game_nick TEXT,
+  nickname_snapshot TEXT,
+  status TEXT NOT NULL CHECK(status IN ('CREATED', 'WAIT_PAYMENT', 'PROOF_SENT', 'REVIEW', 'PAID', 'REJECTED', 'DELIVERED', 'CLOSED')),
+  total_amount INTEGER NOT NULL,
+  payment_method TEXT NOT NULL,
+  proof_file_id TEXT,
+  proof_type TEXT,
+  proof_received_at TEXT,
+  proof_path TEXT,
+  reminder_sent_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+CREATE TABLE IF NOT EXISTS order_status_history (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  order_id INTEGER NOT NULL,
+  status TEXT NOT NULL,
+  changed_by TEXT,
+  source TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY (order_id) REFERENCES orders(id)
+);
+
+CREATE TABLE IF NOT EXISTS order_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  order_id INTEGER NOT NULL,
+  item_id INTEGER NOT NULL,
+  qty INTEGER NOT NULL,
+  price_snapshot INTEGER NOT NULL,
+  FOREIGN KEY (order_id) REFERENCES orders(id),
+  FOREIGN KEY (item_id) REFERENCES items(id)
+);
+
+CREATE TABLE IF NOT EXISTS admin_actions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  order_id INTEGER,
+  admin_telegram_id TEXT NOT NULL,
+  action TEXT NOT NULL,
+  note TEXT,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY (order_id) REFERENCES orders(id)
+);
+
+CREATE TABLE IF NOT EXISTS settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  updated_by TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS payment_history (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  type TEXT NOT NULL CHECK(type IN ('dc', 'card')),
+  value TEXT NOT NULL,
+  changed_by TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS promos (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  code TEXT UNIQUE NOT NULL,
+  type TEXT NOT NULL CHECK(type IN ('percent', 'fixed')),
+  value INTEGER NOT NULL,
+  expires_at TEXT,
+  usage_limit INTEGER,
+  used_count INTEGER NOT NULL DEFAULT 0,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS order_outbox (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  order_id INTEGER NOT NULL,
+  event_type TEXT NOT NULL,
+  processed_at TEXT,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY (order_id) REFERENCES orders(id)
+);
+`;

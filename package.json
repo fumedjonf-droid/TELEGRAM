@@ -1,0 +1,11 @@
+{
+  "name": "telegram-shop",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently -k -n webapp,backend \"npm --prefix webapp run build -- --watch\" \"npm --prefix backend run dev\"",
+    "start:prod": "npm --prefix webapp run build && npm --prefix backend run build && npm --prefix backend run start"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.0"
+  }
+}
