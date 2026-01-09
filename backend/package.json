@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "concurrently -k -n webapp,backend \"npm --prefix ../webapp run build -- --watch\" \"npm run dev:api\"",
-    "dev:api": "BOT_ENABLED=false node --import tsx src/index.ts",
+    "dev:api": "node --import tsx src/index.ts",
+    "dev:api:no-bot": "BOT_ENABLED=false node --import tsx src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
     "start:prod": "npm --prefix ../webapp run build && npm run build && npm run start",
