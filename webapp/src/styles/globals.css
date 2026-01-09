@@ -1,23 +1,57 @@
 :root {
   font-family: "Rajdhani", system-ui, sans-serif;
   color: #f8fafc;
-  background-color: #0b0d13;
+  background-color: #06070b;
 }
 
 body {
   margin: 0;
-  background: #0b0d13;
+  background: #06070b;
 }
 
 .page {
-  padding: 14px 14px 40px;
+  padding: 16px 16px 40px;
   min-height: 100vh;
   position: relative;
   color: #f8fafc;
+  overflow: hidden;
 }
 
 .support-button {
   display: none;
+}
+
+.cinematic-shell {
+  position: relative;
+  z-index: 1;
+}
+
+.cinematic-shell::before {
+  content: "";
+  position: absolute;
+  inset: -20% -30% auto;
+  height: 65%;
+  background: linear-gradient(140deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0));
+  filter: blur(60px);
+  opacity: 0.2;
+  animation: slowGlow 10s ease-in-out infinite;
+  pointer-events: none;
+  z-index: -1;
+}
+
+@keyframes slowGlow {
+  0% {
+    transform: translate(-8%, -10%) rotate(-6deg);
+    opacity: 0.18;
+  }
+  50% {
+    transform: translate(6%, 10%) rotate(3deg);
+    opacity: 0.25;
+  }
+  100% {
+    transform: translate(-8%, -10%) rotate(-6deg);
+    opacity: 0.18;
+  }
 }
 
 .shop-header {
@@ -52,15 +86,16 @@ body {
 }
 
 .hero-banner {
-  height: 118px;
-  border-radius: 16px;
-  background: linear-gradient(120deg, #2a2e36 0%, #1b1f27 45%, #2a2e36 100%);
+  height: 116px;
+  border-radius: 18px;
+  background: linear-gradient(135deg, #2b2b2b 0%, #1a1a1a 45%, #2b2b2b 100%);
   position: relative;
   overflow: hidden;
   display: flex;
   align-items: center;
   justify-content: center;
   margin-bottom: 14px;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04), 0 12px 24px rgba(0, 0, 0, 0.35);
 }
 
 .hero-banner::before,
@@ -84,25 +119,27 @@ body {
 }
 
 .hero-logo {
+  font-family: "Orbitron", "Rajdhani", system-ui, sans-serif;
   font-weight: 700;
-  font-size: 26px;
-  letter-spacing: 3px;
-  padding: 12px 22px;
-  border-radius: 18px;
-  background: linear-gradient(135deg, rgba(255, 166, 58, 0.8), rgba(158, 95, 255, 0.8));
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
-  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+  font-size: 22px;
+  letter-spacing: 2.4px;
+  padding: 10px 26px;
+  color: #f8fafc;
+  background: linear-gradient(135deg, #ffb347 0%, #ff7a18 35%, #7a3cff 100%);
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.4), 0 0 18px rgba(255, 166, 58, 0.35);
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+  clip-path: polygon(6% 0%, 92% 0%, 100% 30%, 92% 100%, 6% 100%, 0% 70%);
 }
 
 .category-stack {
   display: grid;
-  gap: 12px;
+  gap: 14px;
 }
 
 .category-card {
-  height: 86px;
-  border-radius: 18px;
-  padding: 18px;
+  height: 92px;
+  border-radius: 22px;
+  padding: 18px 20px;
   display: flex;
   align-items: center;
   justify-content: flex-start;
@@ -112,24 +149,50 @@ body {
   color: #f8fafc;
   background-size: cover;
   background-position: center;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08), 0 10px 20px rgba(0, 0, 0, 0.25);
+  box-shadow: inset 0 0 12px rgba(255, 255, 255, 0.04), 0 16px 28px rgba(0, 0, 0, 0.35);
+  position: relative;
+  overflow: hidden;
+  animation: floatCard 4.6s ease-in-out infinite;
+}
+
+.category-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(circle at 20% 20%, rgba(255, 255, 255, 0.22), transparent 35%),
+    radial-gradient(circle at 80% 30%, rgba(255, 255, 255, 0.16), transparent 40%),
+    radial-gradient(circle at 40% 70%, rgba(255, 255, 255, 0.12), transparent 40%);
+  opacity: 0.5;
+  pointer-events: none;
 }
 
 .category-card.free-fire {
-  background-image: linear-gradient(120deg, #0d2b6f 0%, #1c3e9b 50%, #0b1a4a 100%);
+  background-image: linear-gradient(120deg, #0b1428 0%, #162447 55%, #0b1223 100%);
 }
 
 .category-card.steam {
-  background-image: linear-gradient(120deg, #1f2937 0%, #2f3b52 60%, #1f2a3d 100%);
+  background-image: linear-gradient(120deg, #161b22 0%, #273040 60%, #141a24 100%);
 }
 
 .category-card.pubg-mobile {
-  background-image: linear-gradient(120deg, #2f2b1c 0%, #403425 60%, #1b1810 100%);
+  background-image: linear-gradient(120deg, #211a14 0%, #3a2b1f 60%, #1a1310 100%);
 }
 
 .category-title {
   text-transform: uppercase;
+  font-family: "Orbitron", "Rajdhani", system-ui, sans-serif;
+  font-style: italic;
   text-shadow: 0 2px 6px rgba(0, 0, 0, 0.6);
+}
+
+@keyframes floatCard {
+  0%,
+  100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
 }
 
 .search {
