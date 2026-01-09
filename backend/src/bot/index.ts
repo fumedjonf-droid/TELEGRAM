@@ -541,7 +541,6 @@ export const createBot = () => {
       } else {
         await ctx.replyWithDocument(order.proofFileId);
       }
-    }
   });
 
   bot.command("listitems", requireAdminChat, requirePermission(["manage_items"]), async (ctx) => {
