@@ -1,32 +1,36 @@
 import { useEffect, useMemo, useState } from "react";
 import { PageContainer } from "../../components/layout/PageContainer";
 import { motion } from "framer-motion";
+import freeFireHero from "../../assets/free-fire.svg";
+import steamHero from "../../assets/steam.svg";
+import pubgHero from "../../assets/pubg.svg";
+import um4dHero from "../../assets/um4d-hero.svg";
 
 export const ShopHome = () => {
   const categories = useMemo(
     () => [
-      { id: 1, name: "FREE FIRE", style: "free-fire" },
-      { id: 2, name: "STEAM", style: "steam" },
-      { id: 3, name: "PUBG MOBILE", style: "pubg-mobile" }
+      { id: 1, name: "FREE FIRE", image: freeFireHero },
+      { id: 2, name: "STEAM", image: steamHero },
+      { id: 3, name: "PUBG MOBILE", image: pubgHero }
     ],
     []
   );
   const [isReady, setIsReady] = useState(false);
   const revealDelay = 0;
   const cardVariants = {
-    hidden: { opacity: 0, y: 20, scale: 0.96 },
+    hidden: { opacity: 0, y: 20, scale: 0.97 },
     show: (index: number) => ({
       opacity: 1,
       y: 0,
       scale: 1,
       transition: {
-        duration: 0.48,
+        duration: 0.46,
         ease: [0.2, 0.8, 0.2, 1],
-        delay: revealDelay + index * 0.14
+        delay: revealDelay + index * 0.12
       }
     })
   };
-  const logoDelay = revealDelay + categories.length * 0.14 + 0.1;
+  const logoDelay = revealDelay + categories.length * 0.12 + 0.1;
 
   useEffect(() => {
     const timer = window.setTimeout(() => setIsReady(true), 650);
@@ -37,25 +41,11 @@ export const ShopHome = () => {
     <PageContainer>
       <div className="cinematic-shell">
         <motion.header
-          className="shop-header"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: isReady ? 1 : 0 }}
-          transition={{ duration: 0.3, delay: revealDelay }}
-        >
-          <div className="shop-header-left">
-            <span className="icon-button">←</span>
-            <span className="header-label">Назад</span>
-          </div>
-          <div className="shop-header-right">
-            <span className="icon-button">⌄</span>
-            <span className="icon-button">⋮</span>
-          </div>
-        </motion.header>
-        <motion.section
           className="hero-banner"
           initial={{ opacity: 0 }}
           animate={{ opacity: isReady ? 1 : 0 }}
-          transition={{ duration: 0.35, delay: revealDelay }}
+          transition={{ duration: 0.45, delay: revealDelay }}
+          style={{ backgroundImage: `url(${um4dHero})` }}
         >
           <motion.div
             className="hero-logo"
@@ -65,16 +55,17 @@ export const ShopHome = () => {
           >
             UM4D
           </motion.div>
-        </motion.section>
+        </motion.header>
         <section className="category-stack">
           {categories.map((category, index) => (
             <motion.div
               key={category.id}
-              className={`category-card ${category.style}`}
+              className="category-card"
               custom={index}
               initial="hidden"
               animate={isReady ? "show" : "hidden"}
               variants={cardVariants}
+              style={{ backgroundImage: `url(${category.image})` }}
             >
               <span className="category-title">{category.name}</span>
             </motion.div>
