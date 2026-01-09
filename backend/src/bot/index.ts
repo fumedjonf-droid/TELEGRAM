@@ -1081,7 +1081,6 @@ export const createBot = () => {
       pendingItem.step = "photo";
       await ctx.reply("Отправьте фото товара.");
     }
-    }
   );
 
   return bot;
