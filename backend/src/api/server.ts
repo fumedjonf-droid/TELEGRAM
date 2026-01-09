@@ -19,6 +19,9 @@ if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
+const webDist = path.resolve(process.cwd(), "../webapp/dist");
+const hasWebDist = fs.existsSync(webDist);
+
 const sanitizeFilename = (name: string) => {
   const base = path.basename(name).replace(/[^a-zA-Z0-9._-]/g, "_");
   return base.slice(0, 64) || "file";
@@ -224,10 +227,6 @@ export const createServer = () => {
 
   app.get("/health", (_req, res) => {
     res.json({ ok: true });
-  });
-
-  app.get("/", (_req, res) => {
-    res.json({ ok: true, service: "telegram-shop-backend" });
   });
 
   app.post("/api/auth/telegram", (req, res) => {
@@ -760,10 +759,15 @@ export const createServer = () => {
     return res.json({ ...order, items });
   });
 
-  const webDist = path.resolve(process.cwd(), "../webapp/dist");
-  if (fs.existsSync(webDist)) {
+  if (hasWebDist) {
     app.use(express.static(webDist));
     app.get(/^\/(?!api\/).*/, (_req, res) => res.sendFile(path.join(webDist, "index.html")));
+  }
+
+  if (!hasWebDist) {
+    app.get("/", (_req, res) => {
+      res.json({ ok: true, service: "telegram-shop-backend" });
+    });
   }
 
   app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
