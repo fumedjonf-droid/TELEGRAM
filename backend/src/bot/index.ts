@@ -91,6 +91,17 @@ const requireAdminChat = async (ctx: any, next: () => Promise<void>) => {
   await next();
 };
 
+const requireAdminChatSilent = async (ctx: any, next: () => Promise<void>) => {
+  if (!ctx.chat) {
+    return;
+  }
+  const chatId = String(ctx.chat.id);
+  if (chatId !== config.ADMIN_GROUP_ID) {
+    return;
+  }
+  await next();
+};
+
 const requirePermission = (permissions: Permission[]) => async (ctx: any, next: () => Promise<void>) => {
   if (!ctx.from) {
     return;
@@ -833,145 +844,150 @@ export const createBot = () => {
     }
   });
 
-  bot.on(["text", "photo"], requireAdminChat, requirePermission(["manage_items", "manage_payments"]), async (ctx) => {
-    const incomingText = ctx.message.text?.trim();
-    if (incomingText?.startsWith("/")) {
-      return;
-    }
-    const pendingAdmin = pendingAdminInputs.get(String(ctx.from.id));
-    if (pendingAdmin) {
-      const text = incomingText ?? "";
-      const db = getDb();
-      if (pendingAdmin.action === "edit_item") {
-        const id = Number(text);
-        if (!id) {
-          await ctx.reply("Отправьте корректный ID товара.");
-          return;
-        }
-        pendingAdminInputs.delete(String(ctx.from.id));
-        pendingItems.set(String(ctx.from.id), { mode: "edit", id, step: "name" });
-        await ctx.reply(`Введите новое название товара (#${id}).`);
+  bot.on(
+    ["text", "photo"],
+    requireAdminChatSilent,
+    requirePermission(["manage_items", "manage_payments"]),
+    async (ctx) => {
+      const incomingText = ctx.message.text?.trim();
+      if (incomingText?.startsWith("/")) {
         return;
       }
-      if (pendingAdmin.action === "toggle_item") {
-        const id = Number(text);
-        if (!id) {
-          await ctx.reply("Отправьте корректный ID товара.");
+      const pendingAdmin = pendingAdminInputs.get(String(ctx.from.id));
+      if (pendingAdmin) {
+        const text = incomingText ?? "";
+        const db = getDb();
+        if (pendingAdmin.action === "edit_item") {
+          const id = Number(text);
+          if (!id) {
+            await ctx.reply("Отправьте корректный ID товара.");
+            return;
+          }
+          pendingAdminInputs.delete(String(ctx.from.id));
+          pendingItems.set(String(ctx.from.id), { mode: "edit", id, step: "name" });
+          await ctx.reply(`Введите новое название товара (#${id}).`);
           return;
         }
-        const item = db
-          .prepare("SELECT is_active as isActive FROM items WHERE id = ?")
-          .get(id) as { isActive: number } | undefined;
-        if (!item) {
-          await ctx.reply("Товар не найден.");
+        if (pendingAdmin.action === "toggle_item") {
+          const id = Number(text);
+          if (!id) {
+            await ctx.reply("Отправьте корректный ID товара.");
+            return;
+          }
+          const item = db
+            .prepare("SELECT is_active as isActive FROM items WHERE id = ?")
+            .get(id) as { isActive: number } | undefined;
+          if (!item) {
+            await ctx.reply("Товар не найден.");
+            return;
+          }
+          const next = item.isActive ? 0 : 1;
+          db.prepare("UPDATE items SET is_active = ?, updated_at = ? WHERE id = ?").run(
+            next,
+            nowIso(),
+            id
+          );
+          pendingAdminInputs.delete(String(ctx.from.id));
+          await ctx.reply(`✅ Товар #${id} теперь ${next ? "включён" : "выключен"}.`);
           return;
         }
-        const next = item.isActive ? 0 : 1;
-        db.prepare("UPDATE items SET is_active = ?, updated_at = ? WHERE id = ?").run(
-          next,
-          nowIso(),
-          id
-        );
-        pendingAdminInputs.delete(String(ctx.from.id));
-        await ctx.reply(`✅ Товар #${id} теперь ${next ? "включён" : "выключен"}.`);
-        return;
-      }
-      if (pendingAdmin.action === "add_category") {
-        if (!text) {
-          await ctx.reply("Отправьте название категории.");
+        if (pendingAdmin.action === "add_category") {
+          if (!text) {
+            await ctx.reply("Отправьте название категории.");
+            return;
+          }
+          db.prepare("INSERT INTO categories (name, sort_order, is_active) VALUES (?, 0, 1)").run(text);
+          pendingAdminInputs.delete(String(ctx.from.id));
+          await ctx.reply("✅ Категория добавлена.");
           return;
         }
-        db.prepare("INSERT INTO categories (name, sort_order, is_active) VALUES (?, 0, 1)").run(text);
-        pendingAdminInputs.delete(String(ctx.from.id));
-        await ctx.reply("✅ Категория добавлена.");
-        return;
-      }
-      if (pendingAdmin.action === "edit_category") {
-        const [idRaw, ...rest] = text.split(" ");
-        const id = Number(idRaw);
-        const name = rest.join(" ").trim();
-        if (!id || !name) {
-          await ctx.reply("Отправьте: <id> <новое название>");
+        if (pendingAdmin.action === "edit_category") {
+          const [idRaw, ...rest] = text.split(" ");
+          const id = Number(idRaw);
+          const name = rest.join(" ").trim();
+          if (!id || !name) {
+            await ctx.reply("Отправьте: <id> <новое название>");
+            return;
+          }
+          db.prepare("UPDATE categories SET name = ? WHERE id = ?").run(name, id);
+          pendingAdminInputs.delete(String(ctx.from.id));
+          await ctx.reply(`✅ Категория #${id} обновлена.`);
           return;
         }
-        db.prepare("UPDATE categories SET name = ? WHERE id = ?").run(name, id);
-        pendingAdminInputs.delete(String(ctx.from.id));
-        await ctx.reply(`✅ Категория #${id} обновлена.`);
-        return;
-      }
-      if (pendingAdmin.action === "toggle_category") {
-        const id = Number(text);
-        if (!id) {
-          await ctx.reply("Отправьте корректный ID категории.");
+        if (pendingAdmin.action === "toggle_category") {
+          const id = Number(text);
+          if (!id) {
+            await ctx.reply("Отправьте корректный ID категории.");
+            return;
+          }
+          const category = db
+            .prepare("SELECT is_active as isActive FROM categories WHERE id = ?")
+            .get(id) as { isActive: number } | undefined;
+          if (!category) {
+            await ctx.reply("Категория не найдена.");
+            return;
+          }
+          const next = category.isActive ? 0 : 1;
+          db.prepare("UPDATE categories SET is_active = ? WHERE id = ?").run(next, id);
+          pendingAdminInputs.delete(String(ctx.from.id));
+          await ctx.reply(`✅ Категория #${id} теперь ${next ? "включена" : "выключена"}.`);
           return;
         }
-        const category = db
-          .prepare("SELECT is_active as isActive FROM categories WHERE id = ?")
-          .get(id) as { isActive: number } | undefined;
-        if (!category) {
-          await ctx.reply("Категория не найдена.");
+        if (pendingAdmin.action === "order_by_id") {
+          const id = Number(text);
+          if (!id) {
+            await ctx.reply("Отправьте корректный ID заказа.");
+            return;
+          }
+          const order = db
+            .prepare(
+              "SELECT orders.id, orders.status, orders.total_amount as totalAmount, users.telegram_id as telegramId FROM orders JOIN users ON users.id = orders.user_id WHERE orders.id = ?"
+            )
+            .get(id) as { id: number; status: string; totalAmount: number; telegramId: string } | undefined;
+          pendingAdminInputs.delete(String(ctx.from.id));
+          if (!order) {
+            await ctx.reply("Заказ не найден.");
+            return;
+          }
+          await ctx.reply(`#${order.id} • ${order.status} • ${order.totalAmount} • user ${order.telegramId}`);
           return;
         }
-        const next = category.isActive ? 0 : 1;
-        db.prepare("UPDATE categories SET is_active = ? WHERE id = ?").run(next, id);
-        pendingAdminInputs.delete(String(ctx.from.id));
-        await ctx.reply(`✅ Категория #${id} теперь ${next ? "включена" : "выключена"}.`);
-        return;
-      }
-      if (pendingAdmin.action === "order_by_id") {
-        const id = Number(text);
-        if (!id) {
-          await ctx.reply("Отправьте корректный ID заказа.");
+        if (pendingAdmin.action === "order_by_user") {
+          if (!text) {
+            await ctx.reply("Отправьте telegram_id пользователя.");
+            return;
+          }
+          const orders = db
+            .prepare(
+              "SELECT orders.id, orders.status, orders.total_amount as totalAmount FROM orders JOIN users ON users.id = orders.user_id WHERE users.telegram_id = ? ORDER BY orders.created_at DESC LIMIT 10"
+            )
+            .all(text) as { id: number; status: string; totalAmount: number }[];
+          pendingAdminInputs.delete(String(ctx.from.id));
+          if (!orders.length) {
+            await ctx.reply("Заказы не найдены.");
+            return;
+          }
+          await ctx.reply(orders.map((o) => `#${o.id} • ${o.status} • ${o.totalAmount}`).join("\n"));
           return;
         }
-        const order = db
-          .prepare(
-            "SELECT orders.id, orders.status, orders.total_amount as totalAmount, users.telegram_id as telegramId FROM orders JOIN users ON users.id = orders.user_id WHERE orders.id = ?"
-          )
-          .get(id) as { id: number; status: string; totalAmount: number; telegramId: string } | undefined;
-        pendingAdminInputs.delete(String(ctx.from.id));
-        if (!order) {
-          await ctx.reply("Заказ не найден.");
+        if (pendingAdmin.action === "order_by_game") {
+          if (!text) {
+            await ctx.reply("Отправьте игровой ID.");
+            return;
+          }
+          const orders = db
+            .prepare(
+              "SELECT id, status, total_amount as totalAmount FROM orders WHERE game_id = ? ORDER BY created_at DESC LIMIT 10"
+            )
+            .all(text) as { id: number; status: string; totalAmount: number }[];
+          pendingAdminInputs.delete(String(ctx.from.id));
+          if (!orders.length) {
+            await ctx.reply("Заказы не найдены.");
+            return;
+          }
+          await ctx.reply(orders.map((o) => `#${o.id} • ${o.status} • ${o.totalAmount}`).join("\n"));
           return;
         }
-        await ctx.reply(`#${order.id} • ${order.status} • ${order.totalAmount} • user ${order.telegramId}`);
-        return;
-      }
-      if (pendingAdmin.action === "order_by_user") {
-        if (!text) {
-          await ctx.reply("Отправьте telegram_id пользователя.");
-          return;
-        }
-        const orders = db
-          .prepare(
-            "SELECT orders.id, orders.status, orders.total_amount as totalAmount FROM orders JOIN users ON users.id = orders.user_id WHERE users.telegram_id = ? ORDER BY orders.created_at DESC LIMIT 10"
-          )
-          .all(text) as { id: number; status: string; totalAmount: number }[];
-        pendingAdminInputs.delete(String(ctx.from.id));
-        if (!orders.length) {
-          await ctx.reply("Заказы не найдены.");
-          return;
-        }
-        await ctx.reply(orders.map((o) => `#${o.id} • ${o.status} • ${o.totalAmount}`).join("\n"));
-        return;
-      }
-      if (pendingAdmin.action === "order_by_game") {
-        if (!text) {
-          await ctx.reply("Отправьте игровой ID.");
-          return;
-        }
-        const orders = db
-          .prepare(
-            "SELECT id, status, total_amount as totalAmount FROM orders WHERE game_id = ? ORDER BY created_at DESC LIMIT 10"
-          )
-          .all(text) as { id: number; status: string; totalAmount: number }[];
-        pendingAdminInputs.delete(String(ctx.from.id));
-        if (!orders.length) {
-          await ctx.reply("Заказы не найдены.");
-          return;
-        }
-        await ctx.reply(orders.map((o) => `#${o.id} • ${o.status} • ${o.totalAmount}`).join("\n"));
-        return;
       }
     }
 
@@ -1065,7 +1081,8 @@ export const createBot = () => {
       pendingItem.step = "photo";
       await ctx.reply("Отправьте фото товара.");
     }
-  });
+    }
+  );
 
   return bot;
 };
