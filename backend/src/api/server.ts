@@ -760,6 +760,12 @@ export const createServer = () => {
     return res.json({ ...order, items });
   });
 
+  const webDist = path.resolve(process.cwd(), "../webapp/dist");
+  if (fs.existsSync(webDist)) {
+    app.use(express.static(webDist));
+    app.get(/^\/(?!api\/).*/, (_req, res) => res.sendFile(path.join(webDist, "index.html")));
+  }
+
   app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
     if (err.message === "unsupported_file_type") {
       return sendError(res, 400, "unsupported_file_type");
