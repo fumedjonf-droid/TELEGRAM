@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "concurrently -k -n webapp,backend \"npm --prefix ../webapp run build -- --watch\" \"npm run dev:api\"",
+    "dev": "concurrently -k -n webapp,backend \"npm --prefix ../webapp install && npm --prefix ../webapp run build -- --watch\" \"npm run dev:api\"",
     "dev:api": "node --import tsx src/index.ts",
     "dev:api:no-bot": "BOT_ENABLED=false node --import tsx src/index.ts",
     "build": "tsc",
