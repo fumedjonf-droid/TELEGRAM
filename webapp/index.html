@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>UM4D Store</title>
+    <link rel="stylesheet" href="styles/main.css" />
+    <link rel="stylesheet" href="styles/components.css" />
+    <link rel="stylesheet" href="styles/animations.css" />
+  </head>
+  <body>
+    <div class="app">
+      <main class="container">
+        <header class="banner banner-art">
+          <div class="banner-glow"></div>
+          <div class="logo-float">UM4D</div>
+        </header>
+
+        <section class="category-section">
+          <div class="section-title">
+            <h2>Категории</h2>
+            <span class="subtitle">Выбери игру и переходи к покупкам</span>
+          </div>
+          <div class="category-grid" id="categoryGrid"></div>
+        </section>
+
+        <section class="catalog">
+          <div class="catalog-header">
+            <div>
+              <h2>Каталог</h2>
+              <p class="caption" id="activeCategoryLabel"></p>
+            </div>
+            <button class="ghost-button" id="openCartTop">Корзина</button>
+          </div>
+          <div class="product-grid" id="productGrid"></div>
+        </section>
+
+        <section class="order-status hidden" id="orderStatus">
+          <div class="status-card">
+            <div class="status-badge">✔</div>
+            <h3>Заказ отправлен</h3>
+            <p id="statusText">Ожидает подтверждения оператора.</p>
+            <button class="ghost-button" id="backToCatalog">Вернуться в каталог</button>
+          </div>
+        </section>
+      </main>
+
+      <div class="cart-bar hidden" id="cartBar">
+        <div class="cart-bar-info">
+          <span class="cart-count" id="cartCount">0</span>
+          <div>
+            <p>Корзина</p>
+            <span class="caption" id="cartTotal">0 ₽</span>
+          </div>
+        </div>
+        <button class="primary-button" id="openCart">Оформить</button>
+      </div>
+
+      <div class="sheet-backdrop" id="sheetBackdrop"></div>
+      <div class="bottom-sheet" id="bottomSheet">
+        <div class="sheet-header">
+          <div>
+            <h3>Корзина</h3>
+            <p class="caption" id="sheetTotal">0 ₽</p>
+          </div>
+          <button class="icon-button" id="closeCart">✕</button>
+        </div>
+        <div class="sheet-content">
+          <div class="cart-items" id="cartItems"></div>
+          <div class="checkout">
+            <h4>Checkout</h4>
+            <label class="input-field">
+              <span>ID аккаунта (5-16 цифр)</span>
+              <input type="text" inputmode="numeric" id="accountId" placeholder="Введите ID" />
+              <small class="error" id="idError"></small>
+            </label>
+            <button class="primary-button" id="submitOrder">Отправить заказ</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="js/app.js"></script>
+  </body>
+</html>
