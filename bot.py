@@ -43,6 +43,7 @@ ADMIN_IDS = {
     if admin_id.strip()
 }
 PAYMENT_CHECK_COOLDOWN = int(os.getenv("PAYMENT_CHECK_COOLDOWN", "20"))
+ADMIN_ACTION_MAX_AGE_DAYS = int(os.getenv("ADMIN_ACTION_MAX_AGE_DAYS", "30"))
 SUPPORT_IMAGE_URL = os.getenv("SUPPORT_IMAGE_URL", "")
 REVIEWS_IMAGE_URL = os.getenv("REVIEWS_IMAGE_URL", "")
 
@@ -84,16 +85,6 @@ PROFILE_MENU = [
     [KeyboardButton("⭐️ Избранное")],
 ]
 
-ORDER_TRANSITIONS = {
-    "NEW": {"WAIT_PAY", "REJECTED"},
-    "WAIT_PAY": {"PAID", "EXPIRED", "REJECTED"},
-    "PAID": {"IN_PROGRESS", "REFUNDED", "REJECTED"},
-    "IN_PROGRESS": {"DONE", "REJECTED"},
-    "DONE": set(),
-    "EXPIRED": {"WAIT_PAY", "REJECTED"},
-    "REFUNDED": set(),
-    "REJECTED": set(),
-}
 FINAL_PAYMENT_STATUSES = {"SUCCEEDED", "FAILED", "EXPIRED", "CANCELED", "SUSPICIOUS"}
 
 logging.basicConfig(level=logging.INFO)
@@ -136,10 +127,6 @@ def is_admin(user_id: int) -> bool:
     if ADMIN_IDS:
         return user_id in ADMIN_IDS
     return False
-
-
-def can_transition(current: str, new_status: str) -> bool:
-    return new_status in ORDER_TRANSITIONS.get(current, set())
 
 
 def build_order_buttons(order: dict, payment: dict | None = None) -> InlineKeyboardMarkup:
@@ -205,7 +192,7 @@ async def create_order_for_item(
         CURRENCY,
     )
     db.attach_payment_to_order(order_id, payment_id)
-    db.update_order_status_if(order_id, "NEW", "WAIT_PAY")
+    db.transition_order_status(order_id, "NEW", "WAIT_PAY")
     payment = db.get_payment(PAYMENT_PROVIDER, payment_id)
 
     text = (
@@ -421,6 +408,17 @@ async def handle_support_ticket_text(update: Update, context: ContextTypes.DEFAU
         reply_markup=reply_keyboard(MAIN_MENU),
     )
     return True
+
+
+async def handle_requeue_dead(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.message is None or update.effective_user is None:
+        return
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("Недостаточно прав.")
+        return
+    db = Database()
+    requeued = db.requeue_dead_outbox()
+    await update.message.reply_text(f"Requeued DEAD задач: {requeued}")
 
 
 async def handle_admin_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
@@ -758,6 +756,12 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     _, action, order_id = data.split(":", 2)
     db = Database()
     order = db.get_order(int(order_id))
+    created_at_ts = order.get("created_at_ts") or 0
+    if created_at_ts:
+        max_age_seconds = ADMIN_ACTION_MAX_AGE_DAYS * 86400
+        if int(time.time()) - int(created_at_ts) > max_age_seconds:
+            await query.answer("Кнопка устарела", show_alert=True)
+            return
 
     if action in {"IN_PROGRESS", "DONE", "REJECT"}:
         action_map = {
@@ -766,20 +770,10 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             "REJECT": "REJECTED",
         }
         new_status = action_map[action]
-        if not can_transition(order["status"], new_status):
+        if not db.can_transition(order["status"], new_status):
             await query.answer("Недопустимый переход", show_alert=True)
             return
-        if new_status == "IN_PROGRESS":
-            updated = db.update_order_status_if(
-                int(order_id), "PAID", "IN_PROGRESS"
-            )
-        elif new_status == "DONE":
-            updated = db.update_order_status_if(
-                int(order_id), "IN_PROGRESS", "DONE"
-            )
-        else:
-            db.update_order_status(int(order_id), "REJECTED")
-            updated = True
+        updated = db.transition_order_status(int(order_id), order["status"], new_status)
         if not updated:
             await query.answer("Статус уже изменен", show_alert=True)
             return
@@ -817,8 +811,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             order["currency"],
         )
         db.attach_payment_to_order(int(order_id), payment_id)
-        if can_transition(order["status"], "WAIT_PAY"):
-            db.update_order_status(int(order_id), "WAIT_PAY")
+        db.transition_order_status(int(order_id), order["status"], "WAIT_PAY")
         keyboard = InlineKeyboardMarkup(
             [[InlineKeyboardButton("Оплатить", url=pay_url)]]
         )
@@ -857,6 +850,7 @@ def main() -> None:
     application.add_handler(CommandHandler("stats", handle_stats))
     application.add_handler(CommandHandler("order", handle_order))
     application.add_handler(CommandHandler("version", handle_version))
+    application.add_handler(CommandHandler("requeue_dead", handle_requeue_dead))
     application.add_handler(CommandHandler("diag", handle_diag))
     application.add_handler(CommandHandler("reconcile", handle_reconcile))
     application.add_handler(CallbackQueryHandler(handle_callback))

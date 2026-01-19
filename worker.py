@@ -3,6 +3,7 @@ import asyncio
 import json
 import logging
 import os
+import signal
 import time
 from datetime import datetime, timezone
 from typing import Any
@@ -23,6 +24,7 @@ MAINTENANCE_MODE = os.getenv("MAINTENANCE_MODE", "false").lower() == "true"
 OUTBOX_ALERT_THRESHOLD = int(os.getenv("OUTBOX_ALERT_THRESHOLD", "50"))
 OUTBOX_RETENTION_DAYS = int(os.getenv("OUTBOX_RETENTION_DAYS", "7"))
 WEBHOOK_RETENTION_DAYS = int(os.getenv("WEBHOOK_RETENTION_DAYS", "60"))
+OUTBOX_MAX_ATTEMPTS = int(os.getenv("OUTBOX_MAX_ATTEMPTS", "5"))
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -126,13 +128,18 @@ def enqueue_admin_alert(db: Database, text: str) -> None:
     db.enqueue_outbox("admin_alert", {"text": text})
 
 
-async def run_worker(loop: bool = True, expire_minutes: int = 30) -> None:
+async def run_worker(
+    loop: bool = True,
+    expire_minutes: int = 30,
+    stop_event: asyncio.Event | None = None,
+) -> None:
     if not BOT_TOKEN:
         raise RuntimeError("TELEGRAM_BOT_TOKEN is not set")
     application = Application.builder().token(BOT_TOKEN).build()
     await application.initialize()
     bot = application.bot
     db = Database()
+    stop_event = stop_event or asyncio.Event()
 
     try:
         while True:
@@ -208,15 +215,41 @@ async def run_worker(loop: bool = True, expire_minutes: int = 30) -> None:
 
             items = db.get_pending_outbox(limit=20)
             for item in items:
+                if item["attempts"] >= OUTBOX_MAX_ATTEMPTS:
+                    db.mark_outbox_dead(item["outbox_id"], "Max attempts exceeded")
+                    db.enqueue_outbox(
+                        "admin_alert",
+                        {
+                            "text": (
+                                "<b>Outbox DEAD</b>\n"
+                                f"outbox_id={item['outbox_id']} attempts={item['attempts']}"
+                            )
+                        },
+                    )
+                    continue
                 try:
                     await handle_outbox(db, bot, item)
                     db.mark_outbox_sent(item["outbox_id"])
                 except Exception as exc:  # noqa: BLE001
                     next_time, next_ts = next_attempt_time(item["attempts"])
-                    db.mark_outbox_failed(
-                        item["outbox_id"], str(exc), next_time, next_ts
-                    )
+                    if item["attempts"] + 1 >= OUTBOX_MAX_ATTEMPTS:
+                        db.mark_outbox_dead(item["outbox_id"], str(exc))
+                        db.enqueue_outbox(
+                            "admin_alert",
+                            {
+                                "text": (
+                                    "<b>Outbox DEAD</b>\n"
+                                    f"outbox_id={item['outbox_id']} error={str(exc)[:200]}"
+                                )
+                            },
+                        )
+                    else:
+                        db.mark_outbox_failed(
+                            item["outbox_id"], str(exc), next_time, next_ts
+                        )
             if not loop:
+                break
+            if stop_event.is_set():
                 break
             await asyncio.sleep(5)
     finally:
@@ -228,4 +261,25 @@ if __name__ == "__main__":
     parser.add_argument("--once", action="store_true")
     parser.add_argument("--expire-minutes", type=int, default=30)
     args = parser.parse_args()
-    asyncio.run(run_worker(loop=not args.once, expire_minutes=args.expire_minutes))
+    loop_obj = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop_obj)
+    stop_event = asyncio.Event()
+
+    def _signal_handler() -> None:
+        logger.info("Shutdown signal received")
+        stop_event.set()
+
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            loop_obj.add_signal_handler(sig, _signal_handler)
+        except NotImplementedError:
+            signal.signal(sig, lambda *_: _signal_handler())
+
+    try:
+        loop_obj.run_until_complete(
+            run_worker(
+                loop=not args.once, expire_minutes=args.expire_minutes, stop_event=stop_event
+            )
+        )
+    finally:
+        loop_obj.close()

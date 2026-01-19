@@ -24,6 +24,7 @@ Telegram бот с меню, каталогом, оплатой через pay_u
    export MAINTENANCE_MODE=false
    export PAYMENT_PROVIDER=demo
    export PAYMENT_CHECK_COOLDOWN=20
+   export ADMIN_ACTION_MAX_AGE_DAYS=30
    ```
 5. (Опционально) Баннеры поддержки/отзывов через URL:
    ```bash
@@ -80,6 +81,7 @@ Telegram бот с меню, каталогом, оплатой через pay_u
    export OUTBOX_ALERT_THRESHOLD=50
    export OUTBOX_RETENTION_DAYS=7
    export WEBHOOK_RETENTION_DAYS=60
+   export OUTBOX_MAX_ATTEMPTS=5
    ```
 
 ## Админ-команды
@@ -89,6 +91,7 @@ Telegram бот с меню, каталогом, оплатой через pay_u
 - `/version` — версия бота.
 - `/diag` — быстрая диагностика.
 - `/reconcile today` — сверка платежей (если доступен API провайдера).
+- `/requeue_dead` — вернуть DEAD задачи в очередь (admin).
 
 ## Definition of Done
 

@@ -7,6 +7,16 @@ from pathlib import Path
 from typing import Any
 
 DB_PATH = Path(os.getenv("BOT_DB_PATH", Path(__file__).with_name("bot.db")))
+ALLOWED_TRANSITIONS = {
+    "NEW": {"WAIT_PAY", "REJECTED"},
+    "WAIT_PAY": {"PAID", "EXPIRED", "REJECTED"},
+    "PAID": {"IN_PROGRESS", "REFUNDED", "REJECTED"},
+    "IN_PROGRESS": {"DONE", "REJECTED"},
+    "DONE": set(),
+    "EXPIRED": {"WAIT_PAY", "REJECTED"},
+    "REFUNDED": set(),
+    "REJECTED": set(),
+}
 
 
 class Database:
@@ -187,6 +197,30 @@ class Database:
                     last_checked_at_ts INTEGER NOT NULL,
                     PRIMARY KEY (user_id, order_id)
                 )
+                """
+            )
+            self.connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_orders_user_created
+                ON orders(user_id, created_at_ts)
+                """
+            )
+            self.connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_ledger_order_id
+                ON payment_ledger(order_id)
+                """
+            )
+            self.connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_ledger_payment_id
+                ON payment_ledger(payment_id)
+                """
+            )
+            self.connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_outbox_status_next_attempt
+                ON outbox_messages(status, next_attempt_at_ts)
                 """
             )
         self._ensure_column("users", "total_amount_minor", "INTEGER NOT NULL DEFAULT 0")
@@ -370,6 +404,14 @@ class Database:
                 (new_status, order_id, expected),
             )
         return cursor.rowcount > 0
+
+    def can_transition(self, current: str, new_status: str) -> bool:
+        return new_status in ALLOWED_TRANSITIONS.get(current, set())
+
+    def transition_order_status(self, order_id: int, expected: str, new_status: str) -> bool:
+        if not self.can_transition(expected, new_status):
+            return False
+        return self.update_order_status_if(order_id, expected, new_status)
 
     def update_order_notified_paid(self, order_id: int) -> None:
         notified_at_ts = self._now_ts()
@@ -749,6 +791,36 @@ class Database:
                 """,
                 (error[:500], next_attempt_at, next_attempt_at_ts, outbox_id),
             )
+
+    def mark_outbox_dead(self, outbox_id: int, error: str) -> None:
+        with self.connection:
+            self.connection.execute(
+                """
+                UPDATE outbox_messages
+                SET status = 'DEAD',
+                    last_error = ?
+                WHERE outbox_id = ?
+                """,
+                (error[:500], outbox_id),
+            )
+
+    def requeue_dead_outbox(self) -> int:
+        with self.connection:
+            cursor = self.connection.execute(
+                """
+                UPDATE outbox_messages
+                SET status = 'PENDING',
+                    attempts = 0,
+                    next_attempt_at = ?,
+                    next_attempt_at_ts = ?
+                WHERE status = 'DEAD'
+                """,
+                (
+                    datetime.fromtimestamp(self._now_ts(), tz=timezone.utc).isoformat(),
+                    self._now_ts(),
+                ),
+            )
+        return cursor.rowcount
 
     def expire_old_payments(self, older_than_minutes: int) -> list[dict[str, Any]]:
         cutoff_ts = self._now_ts() - older_than_minutes * 60

@@ -163,7 +163,7 @@ def process_payment_event(db: Database, data: dict[str, Any]) -> dict[str, str]:
             )
             return {"status": "ok"}
 
-        updated = db.update_order_status_if(int(order["order_id"]), "WAIT_PAY", "PAID")
+        updated = db.transition_order_status(int(order["order_id"]), "WAIT_PAY", "PAID")
         if not updated:
             logger.info("Order %s already updated", order["order_id"])
             return {"status": "ok"}
