@@ -159,21 +159,21 @@ async def create_order_for_item(
     if MAINTENANCE_MODE:
         await context.bot.send_message(
             chat_id=chat_id,
-            "Сервис временно на обслуживании. Попробуйте позже.",
+            text="Сервис временно на обслуживании. Попробуйте позже.",
             reply_markup=reply_keyboard(MAIN_MENU),
         )
         return
     if MANUAL_MODE:
         await context.bot.send_message(
             chat_id=chat_id,
-            "Оплата временно в ручном режиме. Свяжитесь с поддержкой.",
+            text="Оплата временно в ручном режиме. Свяжитесь с поддержкой.",
             reply_markup=reply_keyboard(MAIN_MENU),
         )
         return
     if not AUTO_PAYMENTS:
         await context.bot.send_message(
             chat_id=chat_id,
-            "Автооплата отключена. Обратитесь в поддержку для оформления.",
+            text="Автооплата отключена. Обратитесь в поддержку для оформления.",
             reply_markup=reply_keyboard(MAIN_MENU),
         )
         return
