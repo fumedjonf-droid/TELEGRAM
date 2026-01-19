@@ -47,15 +47,14 @@ def backoff_delay(attempts: int) -> int:
     return min(60, 2**attempts)
 
 
-def next_attempt_time(attempts: int) -> str:
+def next_attempt_time(attempts: int) -> tuple[str, int]:
     delay = backoff_delay(attempts)
-    return datetime.fromtimestamp(time.time() + delay, tz=timezone.utc).isoformat()
+    next_ts = int(time.time() + delay)
+    return datetime.fromtimestamp(next_ts, tz=timezone.utc).isoformat(), next_ts
 
 
-
-
-def send_message_with_retry(
-    application: Application,
+async def send_message_with_retry(
+    bot,
     chat_id: int,
     text: str,
     reply_markup: InlineKeyboardMarkup | None = None,
@@ -63,33 +62,31 @@ def send_message_with_retry(
 ) -> None:
     for attempt in range(retries + 1):
         try:
-            asyncio.run(
-                application.bot.send_message(
-                    chat_id=chat_id,
-                    text=text,
-                    parse_mode=ParseMode.HTML,
-                    reply_markup=reply_markup,
-                )
+            await bot.send_message(
+                chat_id=chat_id,
+                text=text,
+                parse_mode=ParseMode.HTML,
+                reply_markup=reply_markup,
             )
             return
         except Exception as exc:  # noqa: BLE001
             if attempt >= retries:
                 raise exc
-            time.sleep(backoff_delay(attempt))
+            await asyncio.sleep(backoff_delay(attempt))
 
 
-def handle_outbox(db: Database, application: Application, item: dict[str, Any]) -> None:
+async def handle_outbox(db: Database, bot, item: dict[str, Any]) -> None:
     payload = json.loads(item["payload"])
     message_type = item["message_type"]
 
     if message_type == "admin_alert":
         if ADMIN_CHAT_ID:
-            send_message_with_retry(application, ADMIN_CHAT_ID, payload["text"])
+            await send_message_with_retry(bot, ADMIN_CHAT_ID, payload["text"])
         return
 
     if message_type == "user_paid":
-        send_message_with_retry(
-            application,
+        await send_message_with_retry(
+            bot,
             payload["user_id"],
             f"<b>Оплата подтверждена</b>\nЗаказ #{payload['order_id']} оплачен.",
         )
@@ -105,8 +102,8 @@ def handle_outbox(db: Database, application: Application, item: dict[str, Any]) 
             f"Товар: {order['item']}\n"
             f"Сумма: {from_minor(order['amount_minor'])} {order['currency']}"
         )
-        send_message_with_retry(
-            application,
+        await send_message_with_retry(
+            bot,
             ADMIN_CHAT_ID,
             admin_text,
             reply_markup=admin_keyboard(int(order["order_id"])),
@@ -114,8 +111,8 @@ def handle_outbox(db: Database, application: Application, item: dict[str, Any]) 
         return
 
     if message_type == "payment_expired":
-        send_message_with_retry(
-            application,
+        await send_message_with_retry(
+            bot,
             payload["user_id"],
             (
                 "<b>Время оплаты истекло</b>\n"
@@ -129,91 +126,101 @@ def enqueue_admin_alert(db: Database, text: str) -> None:
     db.enqueue_outbox("admin_alert", {"text": text})
 
 
-def run_worker(loop: bool = True, expire_minutes: int = 30) -> None:
+async def run_worker(loop: bool = True, expire_minutes: int = 30) -> None:
     if not BOT_TOKEN:
         raise RuntimeError("TELEGRAM_BOT_TOKEN is not set")
     application = Application.builder().token(BOT_TOKEN).build()
+    await application.initialize()
+    bot = application.bot
     db = Database()
 
-    while True:
-        db.set_service_status("worker_heartbeat", datetime.now(timezone.utc).isoformat())
-        router = AlertRouter(db, lambda msg: enqueue_admin_alert(db, msg))
-        outbox_size = db.get_outbox_size()
-        if outbox_size > OUTBOX_ALERT_THRESHOLD:
-            router.alert(
-                "alert:outbox_backlog",
-                "Outbox backlog растёт",
-                "SEV2",
-                value=str(outbox_size),
-                is_active=True,
-            )
-        else:
-            router.clear("alert:outbox_backlog", "Outbox backlog растёт", "SEV2")
+    try:
+        while True:
+            db.set_service_status("worker_heartbeat", str(int(time.time())))
+            router = AlertRouter(db, lambda msg: enqueue_admin_alert(db, msg))
+            outbox_size = db.get_outbox_size()
+            if outbox_size > OUTBOX_ALERT_THRESHOLD:
+                router.alert(
+                    "alert:outbox_backlog",
+                    "Outbox backlog растёт",
+                    "SEV2",
+                    value=str(outbox_size),
+                    is_active=True,
+                )
+            else:
+                router.clear("alert:outbox_backlog", "Outbox backlog растёт", "SEV2")
 
-        last_webhook = db.get_service_status("last_webhook_at")
-        if last_webhook:
-            last_time = datetime.fromisoformat(last_webhook["value"])
-            if (datetime.now(timezone.utc) - last_time).total_seconds() > 600:
-                if db.count_active_payments() > 0:
-                    router.alert(
-                        "alert:webhook_stale",
-                        "Нет webhook > 10 минут при активных оплатах.",
-                        "SEV1",
-                        value=last_webhook["value"],
-                        is_active=True,
-                    )
+            last_webhook = db.get_service_status("last_webhook_at")
+            if last_webhook:
+                try:
+                    last_ts = int(last_webhook["value"])
+                except (TypeError, ValueError):
+                    last_ts = 0
+                if int(time.time()) - last_ts > 600:
+                    if db.count_active_payments() > 0:
+                        router.alert(
+                            "alert:webhook_stale",
+                            "Нет webhook > 10 минут при активных оплатах.",
+                            "SEV1",
+                            value=last_webhook["value"],
+                            is_active=True,
+                        )
+                    else:
+                        router.clear(
+                            "alert:webhook_stale",
+                            "Нет webhook > 10 минут при активных оплатах.",
+                            "SEV1",
+                        )
                 else:
                     router.clear(
                         "alert:webhook_stale",
                         "Нет webhook > 10 минут при активных оплатах.",
                         "SEV1",
                     )
-            else:
-                router.clear(
-                    "alert:webhook_stale",
-                    "Нет webhook > 10 минут при активных оплатах.",
-                    "SEV1",
-                )
 
-        router.alert(
-            "alert:manual_mode",
-            "Включён MANUAL_MODE.",
-            "SEV2",
-            value="enabled",
-            is_active=MANUAL_MODE,
-        )
-        router.alert(
-            "alert:maintenance_mode",
-            "Включён MAINTENANCE_MODE.",
-            "SEV2",
-            value="enabled",
-            is_active=MAINTENANCE_MODE,
-        )
-        router.clear(
-            "alert:worker_stale",
-            "Worker heartbeat stale > 2 minutes.",
-            "SEV2",
-        )
-        expired = db.expire_old_payments(expire_minutes)
-        for entry in expired:
-            db.enqueue_outbox(
-                "payment_expired",
-                {"user_id": entry["user_id"], "order_id": entry["order_id"]},
+            router.alert(
+                "alert:manual_mode",
+                "Включён MANUAL_MODE.",
+                "SEV2",
+                value="enabled",
+                is_active=MANUAL_MODE,
             )
-        db.cleanup_outbox(OUTBOX_RETENTION_DAYS)
-        db.cleanup_webhook_events(WEBHOOK_RETENTION_DAYS)
+            router.alert(
+                "alert:maintenance_mode",
+                "Включён MAINTENANCE_MODE.",
+                "SEV2",
+                value="enabled",
+                is_active=MAINTENANCE_MODE,
+            )
+            router.clear(
+                "alert:worker_stale",
+                "Worker heartbeat stale > 2 minutes.",
+                "SEV2",
+            )
+            expired = db.expire_old_payments(expire_minutes)
+            for entry in expired:
+                db.enqueue_outbox(
+                    "payment_expired",
+                    {"user_id": entry["user_id"], "order_id": entry["order_id"]},
+                )
+            db.cleanup_outbox(OUTBOX_RETENTION_DAYS)
+            db.cleanup_webhook_events(WEBHOOK_RETENTION_DAYS)
 
-        items = db.get_pending_outbox(limit=20)
-        for item in items:
-            try:
-                handle_outbox(db, application, item)
-                db.mark_outbox_sent(item["outbox_id"])
-            except Exception as exc:  # noqa: BLE001
-                next_time = next_attempt_time(item["attempts"])
-                db.mark_outbox_failed(item["outbox_id"], str(exc), next_time)
-        if not loop:
-            break
-        time.sleep(5)
+            items = db.get_pending_outbox(limit=20)
+            for item in items:
+                try:
+                    await handle_outbox(db, bot, item)
+                    db.mark_outbox_sent(item["outbox_id"])
+                except Exception as exc:  # noqa: BLE001
+                    next_time, next_ts = next_attempt_time(item["attempts"])
+                    db.mark_outbox_failed(
+                        item["outbox_id"], str(exc), next_time, next_ts
+                    )
+            if not loop:
+                break
+            await asyncio.sleep(5)
+    finally:
+        await application.shutdown()
 
 
 if __name__ == "__main__":
@@ -221,4 +228,4 @@ if __name__ == "__main__":
     parser.add_argument("--once", action="store_true")
     parser.add_argument("--expire-minutes", type=int, default=30)
     args = parser.parse_args()
-    run_worker(loop=not args.once, expire_minutes=args.expire_minutes)
+    asyncio.run(run_worker(loop=not args.once, expire_minutes=args.expire_minutes))

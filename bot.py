@@ -47,14 +47,14 @@ SUPPORT_IMAGE_URL = os.getenv("SUPPORT_IMAGE_URL", "")
 REVIEWS_IMAGE_URL = os.getenv("REVIEWS_IMAGE_URL", "")
 
 PRICE_MAP = {
-    "PUBG MOBILE": 499.0,
-    "DELTA FORCE": 399.0,
-    "8 BALL POOL": 299.0,
-    "CROSS FIRE MOBILE": 459.0,
-    "MOBILE LEGENDS": 549.0,
-    "BLOOD STRIKE": 349.0,
-    "СЕРТИФИКАТ IOS": 990.0,
-    "БЕЛЫЙ ИНТЕРНЕТ": 199.0,
+    "PUBG MOBILE": 49900,
+    "DELTA FORCE": 39900,
+    "8 BALL POOL": 29900,
+    "CROSS FIRE MOBILE": 45900,
+    "MOBILE LEGENDS": 54900,
+    "BLOOD STRIKE": 34900,
+    "СЕРТИФИКАТ IOS": 99000,
+    "БЕЛЫЙ ИНТЕРНЕТ": 19900,
 }
 
 MAIN_MENU = [
@@ -108,10 +108,6 @@ def reply_keyboard(buttons: list[list[KeyboardButton]]) -> ReplyKeyboardMarkup:
 
 def safe_username(username: str | None) -> str:
     return f"@{username}" if username else "—"
-
-
-def to_minor(amount: float) -> int:
-    return int(round(amount * 100))
 
 
 def from_minor(amount_minor: int) -> str:
@@ -196,7 +192,7 @@ async def create_order_for_item(
         return
     db = Database()
     db.upsert_user(user_id, username)
-    amount_minor = to_minor(PRICE_MAP[item])
+    amount_minor = PRICE_MAP[item]
     order_id = db.create_order(user_id, item, amount_minor, CURRENCY)
     db.deactivate_payments_for_order(order_id)
     payment_id, pay_url = create_payment_link()
@@ -354,7 +350,7 @@ async def handle_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         f"<b>Пользователь:</b> {safe_username(profile['username'])}\n"
         f"<b>Количество заказов:</b> {totals['order_count']}\n"
         f"<b>Общая сумма заказов:</b> {from_minor(totals['paid_sum'])} {CURRENCY}\n"
-        f"<b>Баланс:</b> {profile['balance']} RUB"
+        f"<b>Баланс:</b> {from_minor(int(profile['balance']))} {CURRENCY}"
     )
 
     rules_keyboard = InlineKeyboardMarkup(
@@ -753,6 +749,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
 
     if query.from_user is None or not is_admin(query.from_user.id):
+        await query.answer("Недостаточно прав", show_alert=True)
+        return
+    if ADMIN_CHAT_ID and query.message and query.message.chat_id != ADMIN_CHAT_ID:
         await query.answer("Недостаточно прав", show_alert=True)
         return
 

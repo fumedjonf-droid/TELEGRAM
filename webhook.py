@@ -40,8 +40,6 @@ RATE_LIMIT_STATE: dict[str, tuple[int, float]] = {}
 
 
 def verify_signature(body: bytes, signature: str | None) -> None:
-    if not WEBHOOK_SECRET:
-        logger.warning("PAYMENT_WEBHOOK_SECRET is not set")
     if not signature:
         raise HTTPException(status_code=401, detail="Missing signature")
     expected = hmac.new(WEBHOOK_SECRET.encode(), body, sha256).hexdigest()
@@ -132,7 +130,7 @@ def process_payment_event(db: Database, data: dict[str, Any]) -> dict[str, str]:
             enqueue_admin_alert(
                 db, f"<b>Unknown payment_id:</b> {payment_id} ({provider})"
             )
-            raise HTTPException(status_code=404, detail="Payment not found") from exc
+            return {"status": "ok"}
 
         if payment["amount_minor"] != data["amount_minor"] or payment["currency"] != data["currency"]:
             db.update_payment_status(provider, payment_id, "SUSPICIOUS")
@@ -199,6 +197,18 @@ async def healthz() -> dict[str, str]:
 async def payment_webhook(
     request: Request, x_signature: str | None = Header(default=None)
 ) -> dict[str, str]:
+    if not WEBHOOK_SECRET:
+        logger.error("PAYMENT_WEBHOOK_SECRET is not set")
+        db = Database()
+        router = AlertRouter(db, lambda msg: enqueue_admin_alert(db, msg))
+        router.alert(
+            "alert:webhook_secret_missing",
+            "PAYMENT_WEBHOOK_SECRET is not set. Webhook disabled.",
+            "SEV1",
+            value="missing_secret",
+            is_active=True,
+        )
+        raise HTTPException(status_code=500, detail="Webhook secret not configured")
     client_ip = request.client.host if request.client else "unknown"
     if ALLOWED_IPS and client_ip not in ALLOWED_IPS:
         raise HTTPException(status_code=403, detail="Forbidden")
@@ -217,7 +227,10 @@ async def payment_webhook(
         enqueue_admin_alert(db, "<b>Webhook подпись не прошла проверку</b>")
         raise
 
-    payload = json.loads(body.decode())
+    try:
+        payload = json.loads(body.decode())
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="Invalid JSON") from exc
     log_payload(payload)
     data = parse_payload(payload)
     status = data["status"]
@@ -227,11 +240,14 @@ async def payment_webhook(
         return {"status": "ok"}
 
     db = Database()
-    db.set_service_status("last_webhook_at", datetime.now(timezone.utc).isoformat())
+    db.set_service_status("last_webhook_at", str(int(time.time())))
     worker_heartbeat = db.get_service_status("worker_heartbeat")
     if worker_heartbeat:
-        last = datetime.fromisoformat(worker_heartbeat["value"])
-        if (datetime.now(timezone.utc) - last).total_seconds() > 120:
+        try:
+            last_ts = int(worker_heartbeat["value"])
+        except (TypeError, ValueError):
+            last_ts = 0
+        if int(time.time()) - last_ts > 120:
             router = AlertRouter(db, lambda msg: enqueue_admin_alert(db, msg))
             router.alert(
                 "alert:worker_stale",
