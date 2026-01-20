@@ -1,7 +1,7 @@
 import logging
 import os
 import time
-from uuid import uuid4
+from typing import Any
 
 from telegram import (
     InlineKeyboardButton,
@@ -29,34 +29,28 @@ BUY_GUIDE_URL = "https://example.com/how-to-buy"
 CHANNEL_URL = "https://t.me/your_channel"
 REVIEWS_URL = "https://t.me/your_reviews"
 RULES_URL = "https://example.com/rules"
-PAY_URL_BASE = "https://pay.example.com/pay"
-PAYMENT_PROVIDER = "demo"
-CURRENCY = "RUB"
+
 ADMIN_CHAT_ID = int(os.getenv("ADMIN_CHAT_ID", "0"))
-AUTO_PAYMENTS = os.getenv("AUTO_PAYMENTS", "true").lower() == "true"
-MANUAL_MODE = os.getenv("MANUAL_MODE", "false").lower() == "true"
-MAINTENANCE_MODE = os.getenv("MAINTENANCE_MODE", "false").lower() == "true"
-PAYMENT_PROVIDER = os.getenv("PAYMENT_PROVIDER", PAYMENT_PROVIDER)
 ADMIN_IDS = {
     int(admin_id)
     for admin_id in os.getenv("ADMIN_IDS", "").split(",")
     if admin_id.strip()
 }
-PAYMENT_CHECK_COOLDOWN = int(os.getenv("PAYMENT_CHECK_COOLDOWN", "20"))
-ADMIN_ACTION_MAX_AGE_DAYS = int(os.getenv("ADMIN_ACTION_MAX_AGE_DAYS", "30"))
+
+PAYMENT_CARD_OWNER = os.getenv("PAYMENT_CARD_OWNER", "НЕ УКАЗАНО")
+PAYMENT_CARD_NUMBER = os.getenv("PAYMENT_CARD_NUMBER", "НЕ УКАЗАНО")
+PAYMENT_BANK_NAME = os.getenv("PAYMENT_BANK_NAME", "")
+PAYMENT_COMMENT_TEMPLATE = os.getenv("PAYMENT_COMMENT_TEMPLATE", "ORDER-{order_id}")
+
 SUPPORT_IMAGE_URL = os.getenv("SUPPORT_IMAGE_URL", "")
 REVIEWS_IMAGE_URL = os.getenv("REVIEWS_IMAGE_URL", "")
 
-PRICE_MAP = {
-    "PUBG MOBILE": 49900,
-    "DELTA FORCE": 39900,
-    "8 BALL POOL": 29900,
-    "CROSS FIRE MOBILE": 45900,
-    "MOBILE LEGENDS": 54900,
-    "BLOOD STRIKE": 34900,
-    "СЕРТИФИКАТ IOS": 99000,
-    "БЕЛЫЙ ИНТЕРНЕТ": 19900,
-}
+CURRENCY = "RUB"
+VERSION = "2.0.0"
+START_TIME = time.time()
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 MAIN_MENU = [
     [KeyboardButton("🛍 Каталог"), KeyboardButton("📢 Наш канал")],
@@ -64,37 +58,37 @@ MAIN_MENU = [
     [KeyboardButton("❓ Как купить"), KeyboardButton("✉️ Отзывы")],
 ]
 
-CATALOG_MENU = [
-    [KeyboardButton("PUBG MOBILE")],
-    [KeyboardButton("DELTA FORCE")],
-    [KeyboardButton("8 BALL POOL")],
-    [KeyboardButton("CROSS FIRE MOBILE")],
-    [KeyboardButton("MOBILE LEGENDS")],
-    [KeyboardButton("BLOOD STRIKE")],
-    [KeyboardButton("СЕРТИФИКАТ IOS")],
-    [KeyboardButton("БЕЛЫЙ ИНТЕРНЕТ")],
-    [KeyboardButton("⬅️ Назад")],
+NAV_BACK = "⬅️ Назад"
+NAV_MAIN = "🏠 Главное меню"
+
+CATALOG_SECTIONS = {
+    "💎 Донат": "DONATE",
+    "🧩 Стороннее ПО": "SOFTWARE",
+}
+
+DONATE_GAMES: dict[str, list[dict[str, Any]]] = {
+    "FREE FIRE": [
+        {"name": "Алмазы 100", "amount_minor": 9900, "player_required": True},
+        {"name": "Алмазы 500", "amount_minor": 39900, "player_required": True},
+    ],
+    "PUBG MOBILE": [
+        {"name": "UC 60", "amount_minor": 19900, "player_required": True},
+        {"name": "UC 325", "amount_minor": 99900, "player_required": True},
+    ],
+}
+
+SOFTWARE_ITEMS: list[dict[str, Any]] = [
+    {"name": "Антибан 30 дней", "amount_minor": 49900, "player_required": False},
+    {"name": "Софт VIP", "amount_minor": 99900, "player_required": False},
 ]
-
-PROFILE_MENU = [
-    [KeyboardButton("Пополнить баланс")],
-    [KeyboardButton("Купоны")],
-    [KeyboardButton("Вывод баланса")],
-    [KeyboardButton("🧾 История заказов")],
-    [KeyboardButton("Реферальная программа")],
-    [KeyboardButton("⭐️ Избранное")],
-]
-
-FINAL_PAYMENT_STATUSES = {"SUCCEEDED", "FAILED", "EXPIRED", "CANCELED", "SUSPICIOUS"}
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-VERSION = "1.2.0"
-START_TIME = time.time()
 
 
 def reply_keyboard(buttons: list[list[KeyboardButton]]) -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(buttons, resize_keyboard=True, one_time_keyboard=False)
+
+
+def nav_keyboard() -> ReplyKeyboardMarkup:
+    return reply_keyboard([[KeyboardButton(NAV_BACK), KeyboardButton(NAV_MAIN)]])
 
 
 def safe_username(username: str | None) -> str:
@@ -105,108 +99,102 @@ def from_minor(amount_minor: int) -> str:
     return f"{amount_minor / 100:.2f}"
 
 
-def create_payment_link() -> tuple[str, str]:
-    payment_id = uuid4().hex
-    pay_url = f"{PAY_URL_BASE}/{payment_id}"
-    return payment_id, pay_url
-
-
-def order_card_text(order: dict, updated_by: str | None = None) -> str:
-    base = (
-        f"<b>Заказ #{order['order_id']}</b>\n"
-        f"Товар: {order['item']}\n"
-        f"Сумма: {from_minor(order['amount_minor'])} {order['currency']}\n"
-        f"Статус: {order['status']}"
-    )
-    if updated_by:
-        return f"{base}\nОбновил: {updated_by}"
-    return base
-
-
 def is_admin(user_id: int) -> bool:
     if ADMIN_IDS:
         return user_id in ADMIN_IDS
     return False
 
 
-def build_order_buttons(order: dict, payment: dict | None = None) -> InlineKeyboardMarkup:
-    buttons: list[list[InlineKeyboardButton]] = []
-    if payment and payment.get("pay_url"):
-        buttons.append([InlineKeyboardButton("Оплатить", url=payment["pay_url"])])
-    buttons.append([InlineKeyboardButton("🔄 Проверить оплату", callback_data=f"order_check:{order['order_id']}")])
-    buttons.append([InlineKeyboardButton("♻️ Повторить заказ", callback_data=f"order_repeat:{order['order_id']}")])
-    buttons.append([InlineKeyboardButton("⭐️ В избранное", callback_data=f"order_favorite:{order['order_id']}")])
-    return InlineKeyboardMarkup(buttons)
+def build_start_inline() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("📦 Быстро купить", callback_data="start_quick_buy")],
+            [InlineKeyboardButton("🛍 Открыть каталог", callback_data="start_catalog")],
+            [InlineKeyboardButton("👨‍💻 Поддержка", callback_data="start_support")],
+            [InlineKeyboardButton("📌 Правила", url=RULES_URL)],
+        ]
+    )
 
 
-def order_text(order: dict) -> str:
+def build_catalog_sections() -> ReplyKeyboardMarkup:
+    buttons = [[KeyboardButton(name)] for name in CATALOG_SECTIONS.keys()]
+    buttons.append([KeyboardButton(NAV_BACK), KeyboardButton(NAV_MAIN)])
+    return reply_keyboard(buttons)
+
+
+def build_donate_games() -> ReplyKeyboardMarkup:
+    buttons = [[KeyboardButton(game)] for game in DONATE_GAMES.keys()]
+    buttons.append([KeyboardButton(NAV_BACK), KeyboardButton(NAV_MAIN)])
+    return reply_keyboard(buttons)
+
+
+def build_software_items() -> ReplyKeyboardMarkup:
+    buttons = [[KeyboardButton(item["name"]) ] for item in SOFTWARE_ITEMS]
+    buttons.append([KeyboardButton(NAV_BACK), KeyboardButton(NAV_MAIN)])
+    return reply_keyboard(buttons)
+
+
+def build_items_for_game(game: str) -> ReplyKeyboardMarkup:
+    items = DONATE_GAMES.get(game, [])
+    buttons = [[KeyboardButton(item["name"]) ] for item in items]
+    buttons.append([KeyboardButton(NAV_BACK), KeyboardButton(NAV_MAIN)])
+    return reply_keyboard(buttons)
+
+
+def build_admin_keyboard(order_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("✅ Подтвердить оплату", callback_data=f"admin_confirm:{order_id}")],
+            [InlineKeyboardButton("❌ Отклонить", callback_data=f"admin_reject:{order_id}")],
+            [InlineKeyboardButton("💬 Написать пользователю", callback_data=f"admin_message:{order_id}")],
+            [InlineKeyboardButton("✅ Выполнено", callback_data=f"admin_done:{order_id}")],
+        ]
+    )
+
+
+def build_cancel_keyboard(order_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [[InlineKeyboardButton("Отменить заказ", callback_data=f"order_cancel:{order_id}")]]
+    )
+
+
+def order_card(order: dict[str, Any]) -> str:
     return (
         f"<b>Заказ #{order['order_id']}</b>\n"
-        f"Товар: {order['item']}\n"
-        f"Сумма: {from_minor(order['amount_minor'])} {order['currency']}\n"
+        f"User: {safe_username(order.get('username'))} ({order['user_id']})\n"
+        f"Категория: {order['section']}\n"
+        f"Игра: {order.get('game') or '—'}\n"
+        f"Товар: {order['item_name']}\n"
+        f"Сумма: {from_minor(order['amount_minor'])} {CURRENCY}\n"
+        f"Player ID: {order.get('player_id') or '—'}\n"
         f"Статус: {order['status']}"
     )
 
 
-async def create_order_for_item(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
-    item: str,
-    user_id: int,
-    username: str | None,
-) -> None:
-    chat_id = update.effective_chat.id if update.effective_chat else user_id
-    if MAINTENANCE_MODE:
-        await context.bot.send_message(
-            chat_id=chat_id,
-            text="Сервис временно на обслуживании. Попробуйте позже.",
-            reply_markup=reply_keyboard(MAIN_MENU),
-        )
-        return
-    if MANUAL_MODE:
-        await context.bot.send_message(
-            chat_id=chat_id,
-            text="Оплата временно в ручном режиме. Свяжитесь с поддержкой.",
-            reply_markup=reply_keyboard(MAIN_MENU),
-        )
-        return
-    if not AUTO_PAYMENTS:
-        await context.bot.send_message(
-            chat_id=chat_id,
-            text="Автооплата отключена. Обратитесь в поддержку для оформления.",
-            reply_markup=reply_keyboard(MAIN_MENU),
-        )
-        return
-    db = Database()
-    db.upsert_user(user_id, username)
-    amount_minor = PRICE_MAP[item]
-    order_id = db.create_order(user_id, item, amount_minor, CURRENCY)
-    db.deactivate_payments_for_order(order_id)
-    payment_id, pay_url = create_payment_link()
-    db.create_payment(
-        PAYMENT_PROVIDER,
-        payment_id,
-        order_id,
-        pay_url,
-        amount_minor,
-        CURRENCY,
+def build_payment_text(order: dict[str, Any]) -> str:
+    comment = PAYMENT_COMMENT_TEMPLATE.format(order_id=order["order_id"])
+    bank_line = f"Банк: {PAYMENT_BANK_NAME}\n" if PAYMENT_BANK_NAME else ""
+    return (
+        "<b>Оплатите по реквизитам ниже, затем отправьте чек сюда.</b>\n"
+        "После проверки админом статус изменится.\n\n"
+        f"Сумма: {from_minor(order['amount_minor'])} {CURRENCY}\n"
+        f"Получатель: {PAYMENT_CARD_OWNER}\n"
+        f"Карта: {PAYMENT_CARD_NUMBER}\n"
+        f"{bank_line}"
+        f"Комментарий: {comment}"
     )
-    db.attach_payment_to_order(order_id, payment_id)
-    db.transition_order_status(order_id, "NEW", "WAIT_PAY")
-    payment = db.get_payment(PAYMENT_PROVIDER, payment_id)
 
-    text = (
-        f"<b>Заказ #{order_id}</b>\n"
-        f"Товар: {item}\n"
-        f"Сумма к оплате: {from_minor(amount_minor)} {CURRENCY}\n"
-        "Статус: WAIT_PAY"
-    )
-    await context.bot.send_message(
-        chat_id=chat_id,
-        text=text,
-        parse_mode=ParseMode.HTML,
-        reply_markup=build_order_buttons(db.get_order(order_id), payment),
-    )
+
+def find_item(section: str, game: str | None, item_name: str) -> dict[str, Any] | None:
+    if section == "DONATE" and game:
+        for item in DONATE_GAMES.get(game, []):
+            if item["name"] == item_name:
+                return item
+    if section == "SOFTWARE":
+        for item in SOFTWARE_ITEMS:
+            if item["name"] == item_name:
+                return item
+    return None
 
 
 async def send_photo_or_text(
@@ -234,41 +222,46 @@ async def send_photo_or_text(
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    db = Database()
-    user = update.effective_user
-    if user is None or update.message is None:
+    if update.message is None or update.effective_user is None:
         return
-    db.upsert_user(user.id, user.username)
-
+    db = Database()
+    db.upsert_user(update.effective_user.id, update.effective_user.username)
     text = (
         "<b>Спасибо, что решили воспользоваться нашим сервисом…</b>\n\n"
         "Если нужна помощь — пишите в техподдержку.\n"
         "Как купить — в соответствующем разделе меню.\n"
         f"Пользовательское соглашение: {TERMS_URL}"
     )
-
     await update.message.reply_text(
         text,
         parse_mode=ParseMode.HTML,
         reply_markup=reply_keyboard(MAIN_MENU),
+    )
+    await update.message.reply_text(
+        "Быстрые действия:",
+        reply_markup=build_start_inline(),
     )
 
 
 async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.message is None:
         return
+    context.user_data["section"] = None
+    context.user_data["game"] = None
     await update.message.reply_text(
         "Главное меню:",
         reply_markup=reply_keyboard(MAIN_MENU),
     )
 
 
-async def handle_catalog(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def show_catalog_sections(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.message is None:
         return
+    context.user_data["section"] = None
+    context.user_data["game"] = None
     await update.message.reply_text(
-        "Выберите вашу игру ↓",
-        reply_markup=reply_keyboard(CATALOG_MENU),
+        "Выберите раздел каталога:",
+        reply_markup=build_catalog_sections(),
     )
 
 
@@ -280,7 +273,7 @@ async def handle_support(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     keyboard = InlineKeyboardMarkup(
         [
             [InlineKeyboardButton("Чат поддержки", url=SUPPORT_CHAT_URL)],
-            [InlineKeyboardButton("Оставить заявку", callback_data="support_request")],
+            [InlineKeyboardButton("ПОДДЕРЖКА ПОЛЬЗОВАТЕЛЕЙ", url=SUPPORT_URL)],
         ]
     )
     await send_photo_or_text(update, context, SUPPORT_IMAGE_URL, text, keyboard)
@@ -291,9 +284,9 @@ async def handle_how_to_buy(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return
     text = (
         "<b>Как купить:</b>\n"
-        "1. Выберите игру в каталоге.\n"
-        "2. Следуйте инструкции.\n"
-        "3. Оплатите удобным способом.\n\n"
+        "1. Выберите раздел и товар.\n"
+        "2. Получите реквизиты и оплатите.\n"
+        "3. Отправьте чек, дождитесь подтверждения.\n\n"
         "Подробная инструкция доступна по кнопке ниже."
     )
     keyboard = InlineKeyboardMarkup(
@@ -330,114 +323,122 @@ async def handle_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
     db.upsert_user(user.id, user.username)
     profile = db.get_user(user.id)
-    totals = db.get_user_totals(user.id)
-
+    stats = db.get_user_stats(user.id)
     profile_text = (
         f"<b>Ваш ID:</b> {profile['telegram_id']}\n"
         f"<b>Пользователь:</b> {safe_username(profile['username'])}\n"
-        f"<b>Количество заказов:</b> {totals['order_count']}\n"
-        f"<b>Общая сумма заказов:</b> {from_minor(totals['paid_sum'])} {CURRENCY}\n"
-        f"<b>Баланс:</b> {from_minor(int(profile['balance']))} {CURRENCY}"
+        f"<b>Количество заказов:</b> {stats['order_count']}\n"
+        f"<b>Общая сумма заказов:</b> {from_minor(stats['paid_sum'])} {CURRENCY}\n"
+        f"<b>Баланс:</b> {from_minor(int(profile['balance_minor']))} {CURRENCY}"
     )
-
     rules_keyboard = InlineKeyboardMarkup(
         [[InlineKeyboardButton("Правила", url=RULES_URL)]]
     )
-
     await update.message.reply_text(
         profile_text, parse_mode=ParseMode.HTML, reply_markup=rules_keyboard
     )
-    await update.message.reply_text(
-        "Выберите действие:", reply_markup=reply_keyboard(PROFILE_MENU)
-    )
 
 
-async def handle_catalog_item(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if update.message is None:
-        return
-    item = update.message.text
-    if item not in PRICE_MAP:
-        await update.message.reply_text(
-            "Выберите позицию из каталога.",
-            reply_markup=reply_keyboard(CATALOG_MENU),
-        )
-        return
-
-    user = update.effective_user
-    if user is None:
-        return
-    await create_order_for_item(update, context, item, user.id, user.username)
-
-
-async def handle_support_ticket_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
-    if not context.user_data.get("support_pending"):
+async def handle_user_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    if update.message is None or update.effective_user is None:
         return False
-    if update.message is None:
+    order_id = context.user_data.get("awaiting_receipt")
+    if not order_id:
         return False
-    context.user_data["support_pending"] = False
-    user = update.effective_user
-    if user is None:
+    file_id = None
+    receipt_type = None
+    if update.message.photo:
+        file_id = update.message.photo[-1].file_id
+        receipt_type = "photo"
+    elif update.message.document:
+        file_id = update.message.document.file_id
+        receipt_type = "document"
+    if not file_id:
+        await update.message.reply_text("Пожалуйста, отправьте чек фото или файлом.")
         return True
+    db = Database()
+    updated = db.update_order_receipt(int(order_id), file_id)
+    if not updated:
+        await update.message.reply_text("Не удалось сохранить чек. Проверьте статус заказа.")
+        return True
+    order = db.get_order(int(order_id))
+    context.user_data["awaiting_receipt"] = None
+
     if ADMIN_CHAT_ID:
-        keyboard = InlineKeyboardMarkup(
-            [
-                [
-                    InlineKeyboardButton(
-                        "Ответить пользователю",
-                        callback_data=f"support_reply:{user.id}",
-                    )
-                ]
-            ]
-        )
-        await context.bot.send_message(
-            chat_id=ADMIN_CHAT_ID,
-            text=(
-                "<b>Новая заявка в поддержку</b>\n"
-                f"Пользователь: {safe_username(user.username)} ({user.id})"
-            ),
-            parse_mode=ParseMode.HTML,
-            reply_markup=keyboard,
-        )
-        await context.bot.forward_message(
-            chat_id=ADMIN_CHAT_ID,
-            from_chat_id=update.effective_chat.id,
-            message_id=update.message.message_id,
-        )
+        admin_text = order_card(order) + "\nСтатус: WAIT_ADMIN_CONFIRM"
+        keyboard = build_admin_keyboard(order["order_id"])
+        if receipt_type == "photo":
+            await context.bot.send_photo(
+                chat_id=ADMIN_CHAT_ID,
+                photo=file_id,
+                caption=admin_text,
+                parse_mode=ParseMode.HTML,
+                reply_markup=keyboard,
+            )
+        elif receipt_type == "document":
+            await context.bot.send_document(
+                chat_id=ADMIN_CHAT_ID,
+                document=file_id,
+                caption=admin_text,
+                parse_mode=ParseMode.HTML,
+                reply_markup=keyboard,
+            )
+        else:
+            await context.bot.send_message(
+                chat_id=ADMIN_CHAT_ID,
+                text=admin_text,
+                parse_mode=ParseMode.HTML,
+                reply_markup=keyboard,
+            )
+
     await update.message.reply_text(
-        "Заявка отправлена в поддержку.",
+        "Чек получен. Ожидайте подтверждения администратора.",
         reply_markup=reply_keyboard(MAIN_MENU),
     )
     return True
 
 
-async def handle_requeue_dead(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def handle_player_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     if update.message is None or update.effective_user is None:
-        return
-    if not is_admin(update.effective_user.id):
-        await update.message.reply_text("Недостаточно прав.")
-        return
+        return False
+    if update.message.text is None:
+        return False
+    order_id = context.user_data.get("awaiting_player_id")
+    if not order_id:
+        return False
+    player_id = update.message.text.strip()
     db = Database()
-    requeued = db.requeue_dead_outbox()
-    await update.message.reply_text(f"Requeued DEAD задач: {requeued}")
+    db.update_order_player_id(int(order_id), player_id)
+    updated = db.transition_order_status(int(order_id), "NEW", "WAIT_PAY_MANUAL")
+    if not updated:
+        await update.message.reply_text("Не удалось обновить заказ.")
+        return True
+    order = db.get_order(int(order_id))
+    context.user_data["awaiting_player_id"] = None
+    context.user_data["awaiting_receipt"] = order_id
+    await update.message.reply_text(
+        build_payment_text(order),
+        parse_mode=ParseMode.HTML,
+        reply_markup=build_cancel_keyboard(order["order_id"]),
+    )
+    await update.message.reply_text(
+        "Отправьте чек/скрин оплаты сюда.",
+        reply_markup=nav_keyboard(),
+    )
+    return True
 
 
 async def handle_admin_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
-    if update.message is None:
-        return False
-    if update.effective_user is None:
+    if update.message is None or update.effective_user is None:
         return False
     if not is_admin(update.effective_user.id):
         return False
-    pending = context.chat_data.get("admin_message_target")
-    if not pending:
+    if ADMIN_CHAT_ID and update.effective_chat and update.effective_chat.id != ADMIN_CHAT_ID:
         return False
-    user_id = pending.get("user_id")
-    order_id = pending.get("order_id")
-    is_support = pending.get("support")
-    context.chat_data["admin_message_target"] = None
-    if is_support:
-        db = Database()
-        db.log_support_message(user_id, update.effective_user.id, update.message.text)
+    pending_message = context.chat_data.get("admin_message_target")
+    if pending_message:
+        context.chat_data["admin_message_target"] = None
+        user_id = pending_message["user_id"]
         await context.bot.send_message(
             chat_id=user_id,
             text=(
@@ -446,204 +447,158 @@ async def handle_admin_message(update: Update, context: ContextTypes.DEFAULT_TYP
             ),
             parse_mode=ParseMode.HTML,
         )
-        await update.message.reply_text("Ответ отправлен пользователю.")
+        await update.message.reply_text("Сообщение отправлено пользователю.")
         return True
-    await context.bot.send_message(
-        chat_id=user_id,
-        text=(
-            "<b>Сообщение от поддержки</b>\n"
-            f"По заказу #{order_id}:\n{update.message.text}"
-        ),
-        parse_mode=ParseMode.HTML,
-    )
-    await update.message.reply_text("Сообщение отправлено пользователю.")
-    return True
+    pending_reject = context.chat_data.get("admin_reject_target")
+    if pending_reject:
+        context.chat_data["admin_reject_target"] = None
+        db = Database()
+        order = db.get_order(int(pending_reject))
+        if not db.can_transition(order["status"], "REJECTED"):
+            await update.message.reply_text("Нельзя отклонить заказ в этом статусе.")
+            return True
+        db.transition_order_status(order["order_id"], order["status"], "REJECTED")
+        await context.bot.send_message(
+            chat_id=order["user_id"],
+            text=(
+                f"<b>Заказ #{order['order_id']} отклонён.</b>\n"
+                f"Причина: {update.message.text}"
+            ),
+            parse_mode=ParseMode.HTML,
+        )
+        await update.message.reply_text("Заказ отклонён.")
+        return True
+    return False
 
 
-async def handle_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if update.effective_user is None or update.message is None:
-        return
-    if not is_admin(update.effective_user.id):
-        await update.message.reply_text("Недостаточно прав.")
+async def create_order_for_item(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    section: str,
+    game: str | None,
+    item: dict[str, Any],
+) -> None:
+    if update.message is None or update.effective_user is None:
         return
     db = Database()
-    period = context.args[0] if context.args else "today"
-    if period == "week":
-        stats = db.get_stats(7)
-    else:
-        stats = db.get_stats(1)
-        period = "today"
-    top_items = "\n".join(
-        [f"- {item['item']}: {item['count']}" for item in stats["top_items"]]
-    ) or "—"
-    await update.message.reply_text(
-        f"Период: {period}\n"
-        f"Оплачено заказов: {stats['order_count']}\n"
-        f"Сумма оплат: {from_minor(stats['paid_sum'])} {CURRENCY}\n"
-        f"SUSPICIOUS: {stats['suspicious_count']}\n"
-        f"Top товары:\n{top_items}"
+    db.upsert_user(update.effective_user.id, update.effective_user.username)
+    order_id = db.create_order(
+        update.effective_user.id,
+        update.effective_user.username,
+        section,
+        game,
+        item["name"],
+        item["amount_minor"],
+        status="NEW",
     )
-
-
-async def handle_order(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if update.effective_user is None or update.message is None:
-        return
-    if not is_admin(update.effective_user.id):
-        await update.message.reply_text("Недостаточно прав.")
-        return
-    if not context.args:
-        await update.message.reply_text("Использование: /order <id>")
-        return
-    order_id = int(context.args[0])
-    db = Database()
-    order = db.get_order_with_audit(order_id)
-    text = order_card_text(order)
-    if order["audit_logs"]:
-        audit_lines = [
-            f"{entry['created_at']}: {entry['old_status']} → {entry['new_status']}"
-            f" (admin {entry['admin_id']})"
-            for entry in order["audit_logs"]
-        ]
-        text = f"{text}\n\n<b>Аудит:</b>\n" + "\n".join(audit_lines)
-    await update.message.reply_text(text, parse_mode=ParseMode.HTML)
-
-
-async def handle_version(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if update.effective_user is None or update.message is None:
-        return
-    if not is_admin(update.effective_user.id):
-        await update.message.reply_text("Недостаточно прав.")
-        return
-    await update.message.reply_text(f"Bot version: {VERSION}")
-
-
-async def handle_reconcile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if update.effective_user is None or update.message is None:
-        return
-    if not is_admin(update.effective_user.id):
-        await update.message.reply_text("Недостаточно прав.")
-        return
-    if os.getenv("PAYMENT_RECONCILE_ENABLED", "false").lower() != "true":
+    context.user_data["order_id"] = order_id
+    if item.get("player_required"):
+        context.user_data["awaiting_player_id"] = order_id
         await update.message.reply_text(
-            "Автоматическая сверка не настроена. Укажите PAYMENT_RECONCILE_ENABLED=true."
+            "Введите Player ID для оформления заказа:",
+            reply_markup=nav_keyboard(),
         )
         return
+    updated = db.transition_order_status(order_id, "NEW", "WAIT_PAY_MANUAL")
+    if not updated:
+        await update.message.reply_text("Не удалось обновить заказ.")
+        return
+    order = db.get_order(order_id)
+    context.user_data["awaiting_receipt"] = order_id
     await update.message.reply_text(
-        "Сверка не настроена для данного провайдера. Требуется API провайдера."
+        build_payment_text(order),
+        parse_mode=ParseMode.HTML,
+        reply_markup=build_cancel_keyboard(order_id),
     )
-
-
-async def handle_order_history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if update.message is None:
-        return
-    user = update.effective_user
-    if user is None:
-        return
-    db = Database()
-    orders = db.list_user_orders(user.id, limit=10)
-    if not orders:
-        await update.message.reply_text("История заказов пуста.")
-        return
-    buttons = [
-        [InlineKeyboardButton(f"Открыть заказ #{order['order_id']}", callback_data=f"order_view:{order['order_id']}")]
-        for order in orders
-    ]
     await update.message.reply_text(
-        "Ваши заказы:", reply_markup=InlineKeyboardMarkup(buttons)
+        "Отправьте чек/скрин оплаты сюда.",
+        reply_markup=nav_keyboard(),
     )
-
-
-async def handle_favorites(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if update.message is None:
-        return
-    user = update.effective_user
-    if user is None:
-        return
-    db = Database()
-    favorites = db.list_favorites(user.id)
-    favorites = [item for item in favorites if item in PRICE_MAP]
-    if not favorites:
-        await update.message.reply_text("Избранное пусто.")
-        return
-    buttons = [
-        [InlineKeyboardButton(f"Заказать {item}", callback_data=f"favorite_order:{item}")]
-        for item in favorites
-    ]
-    await update.message.reply_text("Избранное:", reply_markup=InlineKeyboardMarkup(buttons))
-
-
-async def handle_diag(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if update.effective_user is None or update.message is None:
-        return
-    if not is_admin(update.effective_user.id):
-        await update.message.reply_text("Недостаточно прав.")
-        return
-    db = Database()
-    try:
-        db.connection.execute("SELECT 1")
-        db_ok = "ok"
-    except Exception:  # noqa: BLE001
-        db_ok = "error"
-    outbox_size = db.get_outbox_size()
-    last_webhook = db.get_service_status("last_webhook_at")
-    last_webhook_time = last_webhook["value"] if last_webhook else "—"
-    worker_heartbeat = db.get_service_status("worker_heartbeat")
-    worker_time = worker_heartbeat["value"] if worker_heartbeat else "—"
-    uptime_seconds = int(time.time() - START_TIME)
-    load_avg = os.getloadavg()[0] if hasattr(os, "getloadavg") else None
-
-    text = (
-        f"<b>Diag</b>\n"
-        f"Version: {VERSION}\n"
-        f"Uptime(s): {uptime_seconds}\n"
-        f"DB: {db_ok}\n"
-        f"Outbox pending: {outbox_size}\n"
-        f"Last webhook: {last_webhook_time}\n"
-        f"Worker heartbeat: {worker_time}\n"
-        f"Load avg: {load_avg if load_avg is not None else 'n/a'}\n"
-        f"AUTO_PAYMENTS: {AUTO_PAYMENTS}\n"
-        f"MANUAL_MODE: {MANUAL_MODE}\n"
-        f"MAINTENANCE_MODE: {MAINTENANCE_MODE}\n"
-        f"Payment provider: {PAYMENT_PROVIDER}"
-    )
-    await update.message.reply_text(text, parse_mode=ParseMode.HTML)
 
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if update.message is None:
+    if update.message is None or update.effective_user is None:
         return
 
-    if await handle_support_ticket_text(update, context):
+    if await handle_player_id(update, context):
         return
-
+    if await handle_user_receipt(update, context):
+        return
     if await handle_admin_message(update, context):
         return
 
     text = update.message.text
 
     actions = {
-        "🛍 Каталог": handle_catalog,
+        "🛍 Каталог": show_catalog_sections,
         "👨🏻‍💻 Тех.Поддержка": handle_support,
         "❓ Как купить": handle_how_to_buy,
         "📢 Наш канал": handle_channel,
         "✉️ Отзывы": handle_reviews,
         "👤 Профиль / Баланс": handle_profile,
-        "🧾 История заказов": handle_order_history,
-        "⭐️ Избранное": handle_favorites,
-        "⬅️ Назад": show_main_menu,
+        NAV_MAIN: show_main_menu,
     }
 
-    handler = actions.get(text)
-    if handler:
-        await handler(update, context)
+    if text in actions:
+        await actions[text](update, context)
         return
 
-    if text in PRICE_MAP:
-        await handle_catalog_item(update, context)
+    if text == NAV_BACK:
+        if context.user_data.get("game"):
+            await update.message.reply_text(
+                "Выберите игру:", reply_markup=build_donate_games()
+            )
+            return
+        if context.user_data.get("section"):
+            await show_catalog_sections(update, context)
+            return
+        await show_main_menu(update, context)
         return
+
+    if text in CATALOG_SECTIONS:
+        section = CATALOG_SECTIONS[text]
+        context.user_data["section"] = section
+        context.user_data["game"] = None
+        if section == "DONATE":
+            await update.message.reply_text(
+                "Выберите игру:",
+                reply_markup=build_donate_games(),
+            )
+            return
+        await update.message.reply_text(
+            "Выберите товар:",
+            reply_markup=build_software_items(),
+        )
+        return
+
+    if text in DONATE_GAMES:
+        context.user_data["section"] = "DONATE"
+        context.user_data["game"] = text
+        await update.message.reply_text(
+            "Выберите товар:",
+            reply_markup=build_items_for_game(text),
+        )
+        return
+
+    if text in {item["name"] for item in SOFTWARE_ITEMS}:
+        item = find_item("SOFTWARE", None, text)
+        if item is None:
+            await update.message.reply_text("Товар недоступен.")
+            return
+        await create_order_for_item(update, context, "SOFTWARE", None, item)
+        return
+
+    section = context.user_data.get("section")
+    game = context.user_data.get("game")
+    if section == "DONATE" and game:
+        item = find_item("DONATE", game, text)
+        if item:
+            await create_order_for_item(update, context, "DONATE", game, item)
+            return
 
     await update.message.reply_text(
-        "Используйте кнопки меню ниже.", reply_markup=reply_keyboard(MAIN_MENU)
+        "Используйте кнопки меню ниже.",
+        reply_markup=reply_keyboard(MAIN_MENU),
     )
 
 
@@ -652,191 +607,114 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if query is None:
         return
     await query.answer()
-
     data = query.data or ""
-    if data == "support_request":
-        context.user_data["support_pending"] = True
-        await query.message.reply_text("Напишите сообщение для поддержки одним текстом.")
+
+    if data == "start_quick_buy":
+        await query.message.reply_text(
+            "Выберите раздел каталога:",
+            reply_markup=build_catalog_sections(),
+        )
         return
 
-    if data.startswith("support_reply:"):
+    if data == "start_catalog":
+        await query.message.reply_text(
+            "Выберите раздел каталога:",
+            reply_markup=build_catalog_sections(),
+        )
+        return
+
+    if data == "start_support":
+        await handle_support(update, context)
+        return
+
+    if data.startswith("order_cancel:"):
+        _, order_id = data.split(":", 1)
+        db = Database()
+        order = db.get_order(int(order_id))
+        if query.from_user and order["user_id"] != query.from_user.id:
+            await query.answer("Недостаточно прав", show_alert=True)
+            return
+        if db.cancel_order(int(order_id)):
+            if context.user_data.get("awaiting_receipt") == int(order_id):
+                context.user_data["awaiting_receipt"] = None
+            if context.user_data.get("awaiting_player_id") == int(order_id):
+                context.user_data["awaiting_player_id"] = None
+            await query.message.reply_text(
+                "Заказ отменён.", reply_markup=reply_keyboard(MAIN_MENU)
+            )
+        else:
+            await query.message.reply_text("Нельзя отменить заказ на этом этапе.")
+        return
+
+    if data.startswith("admin_confirm:"):
         if query.from_user is None or not is_admin(query.from_user.id):
             await query.answer("Недостаточно прав", show_alert=True)
             return
-        _, user_id = data.split(":", 1)
-        context.chat_data["admin_message_target"] = {
-            "user_id": int(user_id),
-            "support": True,
-        }
-        await query.message.reply_text("Введите ответ пользователю.")
-        return
-
-    if data.startswith("order_view:"):
+        if ADMIN_CHAT_ID and query.message and query.message.chat_id != ADMIN_CHAT_ID:
+            await query.answer("Недостаточно прав", show_alert=True)
+            return
         _, order_id = data.split(":", 1)
         db = Database()
         order = db.get_order(int(order_id))
-        payment = db.get_payment_for_order(int(order_id))
-        await query.message.reply_text(
-            order_text(order),
-            parse_mode=ParseMode.HTML,
-            reply_markup=build_order_buttons(order, payment),
-        )
-        return
-
-    if data.startswith("order_check:"):
-        _, order_id = data.split(":", 1)
-        db = Database()
-        order = db.get_order(int(order_id))
-        payment = db.get_payment_for_order(int(order_id))
-        user = query.from_user
-        if user is None:
+        if not db.transition_order_status(order["order_id"], order["status"], "PAID_MANUAL"):
+            await query.answer("Статус уже изменён", show_alert=True)
             return
-        if not db.can_check_payment(user.id, int(order_id), PAYMENT_CHECK_COOLDOWN):
-            logger.warning("Payment check rate limit: user=%s order=%s", user.id, order_id)
-            await query.message.reply_text(
-                "Слишком частая проверка. Попробуйте позже."
-            )
-            return
-        payment_status = payment["status"] if payment else "—"
-        if payment_status in FINAL_PAYMENT_STATUSES:
-            await query.message.reply_text(
-                f"Оплата уже в финальном статусе: {payment_status}"
-            )
-            return
-        await query.message.reply_text(
-            f"Статус заказа: {order['status']}\nСтатус платежа: {payment_status}"
-        )
-        return
-
-    if data.startswith("order_repeat:"):
-        _, order_id = data.split(":", 1)
-        db = Database()
-        order = db.get_order(int(order_id))
-        user = query.from_user
-        if user is None:
-            return
-        if order["item"] not in PRICE_MAP:
-            await query.message.reply_text("Товар недоступен для повтора.")
-            return
-        await create_order_for_item(update, context, order["item"], user.id, user.username)
-        return
-
-    if data.startswith("order_favorite:"):
-        _, order_id = data.split(":", 1)
-        db = Database()
-        order = db.get_order(int(order_id))
-        user = query.from_user
-        if user is None:
-            return
-        db.add_favorite(user.id, order["item"])
-        await query.message.reply_text("Добавлено в избранное.")
-        return
-
-    if data.startswith("favorite_order:"):
-        _, item = data.split(":", 1)
-        user = query.from_user
-        if user is None:
-            return
-        if item not in PRICE_MAP:
-            await query.message.reply_text("Товар недоступен.")
-            return
-        await create_order_for_item(update, context, item, user.id, user.username)
-        return
-
-    if not data.startswith("admin:"):
-        return
-
-    if query.from_user is None or not is_admin(query.from_user.id):
-        await query.answer("Недостаточно прав", show_alert=True)
-        return
-    if ADMIN_CHAT_ID and query.message and query.message.chat_id != ADMIN_CHAT_ID:
-        await query.answer("Недостаточно прав", show_alert=True)
-        return
-
-    _, action, order_id = data.split(":", 2)
-    db = Database()
-    order = db.get_order(int(order_id))
-    created_at_ts = order.get("created_at_ts") or 0
-    if created_at_ts:
-        max_age_seconds = ADMIN_ACTION_MAX_AGE_DAYS * 86400
-        if int(time.time()) - int(created_at_ts) > max_age_seconds:
-            await query.answer("Кнопка устарела", show_alert=True)
-            return
-
-    if action in {"IN_PROGRESS", "DONE", "REJECT"}:
-        action_map = {
-            "IN_PROGRESS": "IN_PROGRESS",
-            "DONE": "DONE",
-            "REJECT": "REJECTED",
-        }
-        new_status = action_map[action]
-        if not db.can_transition(order["status"], new_status):
-            await query.answer("Недопустимый переход", show_alert=True)
-            return
-        updated = db.transition_order_status(int(order_id), order["status"], new_status)
-        if not updated:
-            await query.answer("Статус уже изменен", show_alert=True)
-            return
-        db.log_order_audit(
-            int(order_id),
-            query.from_user.id,
-            order["status"],
-            new_status,
-        )
-        order = db.get_order(int(order_id))
-        await query.message.edit_text(
-            order_card_text(order, safe_username(query.from_user.username)),
-            parse_mode=ParseMode.HTML,
-            reply_markup=query.message.reply_markup,
-        )
-        return
-
-    if action == "MESSAGE":
-        context.chat_data["admin_message_target"] = {
-            "user_id": order["user_id"],
-            "order_id": order_id,
-        }
-        await query.message.reply_text("Введите сообщение для пользователя.")
-        return
-
-    if action == "RECREATE":
-        db.deactivate_payments_for_order(int(order_id))
-        payment_id, pay_url = create_payment_link()
-        db.create_payment(
-            PAYMENT_PROVIDER,
-            payment_id,
-            int(order_id),
-            pay_url,
-            order["amount_minor"],
-            order["currency"],
-        )
-        db.attach_payment_to_order(int(order_id), payment_id)
-        db.transition_order_status(int(order_id), order["status"], "WAIT_PAY")
-        keyboard = InlineKeyboardMarkup(
-            [[InlineKeyboardButton("Оплатить", url=pay_url)]]
-        )
         await context.bot.send_message(
             chat_id=order["user_id"],
-            text=(
-                f"<b>Новая ссылка на оплату по заказу #{order_id}</b>\n"
-                f"Сумма: {from_minor(order['amount_minor'])} {order['currency']}"
-            ),
+            text=f"<b>Оплата подтверждена</b>\nЗаказ #{order['order_id']} принят в работу.",
             parse_mode=ParseMode.HTML,
-            reply_markup=keyboard,
         )
-        db.log_order_audit(
-            int(order_id),
-            query.from_user.id,
-            order["status"],
-            "WAIT_PAY",
-            reason="recreate_payment",
-        )
+        await query.message.edit_text(order_card(db.get_order(order["order_id"])), parse_mode=ParseMode.HTML, reply_markup=query.message.reply_markup)
+        return
+
+    if data.startswith("admin_done:"):
+        if query.from_user is None or not is_admin(query.from_user.id):
+            await query.answer("Недостаточно прав", show_alert=True)
+            return
+        if ADMIN_CHAT_ID and query.message and query.message.chat_id != ADMIN_CHAT_ID:
+            await query.answer("Недостаточно прав", show_alert=True)
+            return
+        _, order_id = data.split(":", 1)
+        db = Database()
         order = db.get_order(int(order_id))
-        await query.message.edit_text(
-            order_card_text(order, safe_username(query.from_user.username)),
+        if not db.transition_order_status(order["order_id"], order["status"], "DONE"):
+            await query.answer("Недоступно для текущего статуса", show_alert=True)
+            return
+        await context.bot.send_message(
+            chat_id=order["user_id"],
+            text=f"<b>Заказ #{order['order_id']} выполнен.</b>",
             parse_mode=ParseMode.HTML,
-            reply_markup=query.message.reply_markup,
         )
+        await query.message.edit_text(order_card(db.get_order(order["order_id"])), parse_mode=ParseMode.HTML, reply_markup=query.message.reply_markup)
+        return
+
+    if data.startswith("admin_reject:"):
+        if query.from_user is None or not is_admin(query.from_user.id):
+            await query.answer("Недостаточно прав", show_alert=True)
+            return
+        if ADMIN_CHAT_ID and query.message and query.message.chat_id != ADMIN_CHAT_ID:
+            await query.answer("Недостаточно прав", show_alert=True)
+            return
+        _, order_id = data.split(":", 1)
+        context.chat_data["admin_reject_target"] = int(order_id)
+        await query.message.reply_text("Введите причину отклонения заказа.")
+        return
+
+    if data.startswith("admin_message:"):
+        if query.from_user is None or not is_admin(query.from_user.id):
+            await query.answer("Недостаточно прав", show_alert=True)
+            return
+        if ADMIN_CHAT_ID and query.message and query.message.chat_id != ADMIN_CHAT_ID:
+            await query.answer("Недостаточно прав", show_alert=True)
+            return
+        _, order_id = data.split(":", 1)
+        db = Database()
+        order = db.get_order(int(order_id))
+        context.chat_data["admin_message_target"] = {
+            "user_id": order["user_id"],
+        }
+        await query.message.reply_text("Введите сообщение пользователю.")
+        return
 
 
 def main() -> None:
@@ -847,16 +725,10 @@ def main() -> None:
     application = Application.builder().token(token).build()
 
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("stats", handle_stats))
-    application.add_handler(CommandHandler("order", handle_order))
-    application.add_handler(CommandHandler("version", handle_version))
-    application.add_handler(CommandHandler("requeue_dead", handle_requeue_dead))
-    application.add_handler(CommandHandler("diag", handle_diag))
-    application.add_handler(CommandHandler("reconcile", handle_reconcile))
-    application.add_handler(CallbackQueryHandler(handle_callback))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+    application.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL, handle_text))
+    application.add_handler(CallbackQueryHandler(handle_callback))
 
-    logger.info("Bot started")
     application.run_polling()
 
 
